@@ -242,7 +242,7 @@ fn main() {
             conn_net = Some((ssid.clone(), pass.clone()));
             // DHCP address may not be assigned the instant is_connected() turns true.
             let mut ip = "0.0.0.0".to_string();
-            for _ in 0..5 {
+            for _ in 0..15 {
                 let got = wifi
                     .lock()
                     .unwrap()
@@ -369,55 +369,58 @@ if connected {
             let mut ap_up = true; // boot always starts in Mixed (both branches)
             let boot = Instant::now();
             let mut sta_since: Option<Instant> = None;
+            let mut sta_down_since: Option<Instant> = None;
+            let sta_cfg = || match &base_profile {
+                Some((ssid, pass)) => ClientConfiguration {
+                    ssid: heapless::String::<32>::try_from(ssid.as_str()).unwrap(),
+                    password: heapless::String::<64>::try_from(pass.as_str()).unwrap(),
+                    ..Default::default()
+                },
+                None => ClientConfiguration::default(),
+            };
             loop {
                 thread::sleep(Duration::from_secs(3));
-                let boot_elapsed = boot.elapsed();
+                let in_window = boot.elapsed() < Duration::from_secs(60);
                 let conn = wifi_w.lock().unwrap().is_connected().unwrap_or(false);
                 if conn {
                     if sta_since.is_none() {
                         sta_since = Some(Instant::now());
                     }
+                    sta_down_since = None;
                 } else {
+                    if sta_down_since.is_none() {
+                        sta_down_since = Some(Instant::now());
+                    }
                     sta_since = None;
                 }
-                let stable = sta_since
+                let stable_since = sta_since
                     .map(|t| t.elapsed() >= Duration::from_secs(60))
                     .unwrap_or(false);
-                let want_ap = boot_elapsed < Duration::from_secs(60) || !conn || !stable;
+                let lost_long = sta_down_since
+                    .map(|t| t.elapsed() >= Duration::from_secs(15))
+                    .unwrap_or(false);
 
-                // Welcome window already elapsed, STA stable -> go STA-only.
-                if ap_up && !want_ap {
-                    let sta_cfg = match &base_profile {
-                        Some((ssid, pass)) => ClientConfiguration {
-                            ssid: heapless::String::<32>::try_from(ssid.as_str()).unwrap(),
-                            password: heapless::String::<64>::try_from(pass.as_str()).unwrap(),
-                            ..Default::default()
-                        },
-                        None => ClientConfiguration::default(),
-                    };
-                    let mut w = wifi_w.lock().unwrap();
-                    let _ = w.stop();
-                    thread::sleep(Duration::from_millis(200));
-                    if w.set_configuration(&Configuration::Client(sta_cfg)).is_err() || w.start().is_err() {
-                        error!("AP teardown failed");
-                    } else {
-                        ap_up = false;
-                        data_w.lock().unwrap().ap_up = false;
-                        info!("AP dropped: STA stable, STA-only");
+                // Policy: never touch the AP while STA is alive. Only bring it
+                // up after a real loss (>= 15 s) and hold it until STA has been
+                // stable-connected for 60 s again, so weak signal does not flap.
+                if ap_up {
+                    if !in_window && stable_since {
+                        let mut w = wifi_w.lock().unwrap();
+                        let _ = w.stop();
+                        thread::sleep(Duration::from_millis(200));
+                        if w.set_configuration(&Configuration::Client(sta_cfg())).is_err() || w.start().is_err() {
+                            error!("AP teardown failed");
+                        } else {
+                            ap_up = false;
+                            data_w.lock().unwrap().ap_up = false;
+                            info!("AP dropped: STA stable, STA-only");
+                        }
                     }
-                } else if !ap_up && want_ap {
-                    let sta_cfg = match &base_profile {
-                        Some((ssid, pass)) => ClientConfiguration {
-                            ssid: heapless::String::<32>::try_from(ssid.as_str()).unwrap(),
-                            password: heapless::String::<64>::try_from(pass.as_str()).unwrap(),
-                            ..Default::default()
-                        },
-                        None => ClientConfiguration::default(),
-                    };
+                } else if !in_window && lost_long {
                     let mut w = wifi_w.lock().unwrap();
                     let _ = w.stop();
                     thread::sleep(Duration::from_millis(300));
-                    if w.set_configuration(&Configuration::Mixed(sta_cfg, ap_cfg())).is_err() || w.start().is_err() {
+                    if w.set_configuration(&Configuration::Mixed(sta_cfg(), ap_cfg())).is_err() || w.start().is_err() {
                         error!("AP restart failed");
                     } else {
                         thread::sleep(Duration::from_millis(500));
@@ -426,7 +429,7 @@ if connected {
                         }
                         ap_up = true;
                         data_w.lock().unwrap().ap_up = true;
-                        info!("AP up: STA lost or too fresh");
+                        info!("AP up: STA lost for 15s");
                     }
                 }
             }
@@ -465,21 +468,15 @@ if connected {
             let d = data.lock().unwrap();
             let wifi_ip = {
                 let w = wifi.lock().unwrap();
-                let conn = w.is_connected().unwrap_or(false);
-                // Show the AP address only when the AP is actually running
-                // (watchdog keeps data.ap_up in sync), otherwise a stale
-                // cached value would be misleading.
-                let ip_opt: Option<String> = if conn {
-                    w.sta_netif().get_ip_info().ok().map(|i| i.ip.to_string())
+                let sta_ip = w.sta_netif().get_ip_info().ok().map(|i| i.ip.to_string()).filter(|v| v != "0.0.0.0");
+                let ap_ip = w.ap_netif().get_ip_info().ok().map(|i| i.ip.to_string()).filter(|v| v != "0.0.0.0");
+                
+                if let Some(ip) = sta_ip {
+                    ip
                 } else if d.ap_up {
-                    w.ap_netif().get_ip_info().ok().map(|i| i.ip.to_string())
-                } else {
-                    None
-                };
-                if conn {
-                    ip_opt.unwrap_or(d.wifi_ip.clone())
-                } else if d.ap_up {
-                    ip_opt.unwrap_or("192.168.4.1".to_string())
+                    ap_ip.unwrap_or("192.168.4.1".to_string())
+                } else if !d.wifi_ip.is_empty() && d.wifi_ip != "0.0.0.0" {
+                    d.wifi_ip.clone()
                 } else {
                     "no link".to_string()
                 }
@@ -882,26 +879,28 @@ if connected {
                     let (wifi_connected, wifi_ip) = {
                         let w = wifi4.lock().unwrap();
                         let conn = w.is_connected().unwrap_or(false);
-                        let ap_up = {
+                        let last_ip = {
                             let d = data4.lock().unwrap();
-                            d.ap_up
+                            d.wifi_ip.clone()
                         };
-                        let ip_opt: Option<String> = if conn {
-                            w.sta_netif().get_ip_info().ok().map(|i| i.ip.to_string())
-                        } else if ap_up {
-                            w.ap_netif().get_ip_info().ok().map(|i| i.ip.to_string())
+                        let sta_ip = w.sta_netif().get_ip_info().ok().map(|i| i.ip.to_string()).filter(|v| v != "0.0.0.0");
+
+                        let ip_str = if let Some(ref ip) = sta_ip {
+                            ip.clone()
+                        } else if !last_ip.is_empty() && last_ip != "0.0.0.0" {
+                            last_ip
                         } else {
-                            None
+                            "no link".into()
                         };
-                        (conn, ip_opt.unwrap_or_else(|| "no link".into()))
+                        let effective_connected = conn || sta_ip.is_some();
+                        (effective_connected, ip_str)
                     };
-                    let ip_str = wifi_ip;
                     display::draw_data(
                         &mut tft,
                         co2, temp, hum, pm1, pm25, pm10,
                         m_en, m_con,
                         wifi_connected,
-                        &ip_str,
+                        &wifi_ip,
                         &co2_hist,
                     );
                 }
