@@ -94,9 +94,13 @@ fn draw_text(
     color: Rgb565,
     size: u32,
 ) {
-    let mut style = MonoTextStyle::new(font(size), color);
+    let f = font(size);
+    let mut style = MonoTextStyle::new(f, color);
     style.background_color = Some(COLOR_BLACK);
-    Text::new(s, Point::new(x, y), style).draw(display).ok();
+    // embedded-graphics places the glyph box `baseline` rows above position.y
+    Text::new(s, Point::new(x, y + f.baseline as i32), style)
+        .draw(display)
+        .ok();
 }
 
 pub fn fill_screen(display: &mut impl DrawTarget<Color = Rgb565>) {
