@@ -407,17 +407,46 @@ fn main() {
         thread::spawn(move || {
             let scd30_ok = scd30_ok;
             let mut last_log = Instant::now();
+            let mut fw_done = false;
             loop {
                 thread::sleep(Duration::from_millis(500));
 
+                if !fw_done {
+                    fw_done = true;
+                    info!("I2C scan ACK: {:02x?}", scd30.scan_bus());
+                    for reg in [0x0202u16, 0x4600, 0xD100, 0x5100, 0x5300] {
+                        if let Some(b) = scd30.read_u16_raw(reg) {
+                            let crc_ok = sensors::crc8(&b[0..2]) == b[2];
+                            let v = (b[0] as u16) << 8 | b[1] as u16;
+                            info!("SCD30 reg {:#06x} = {:#06x} raw={:02x?} crc={}", reg, v, b, crc_ok);
+                        } else {
+                            info!("SCD30 reg {:#06x} read FAILED", reg);
+                        }
+                    }
+                    if let Some(b) = scd30.read_measurement_raw() {
+                        let mut crcs = String::new();
+                        for i in 0..6 {
+                            let ok = sensors::crc8(&b[i * 3..i * 3 + 2]) == b[i * 3 + 2];
+                            crcs.push(if ok { '1' } else { '0' });
+                        }
+                        info!("SCD30 meas raw={:02X?} crcs={}", b, crcs);
+                    }
+                }
+
                 let raw_ready = scd30.raw_data_ready();
-                let ready = raw_ready == Some(1);
-                if ready {
+                // data-ready flag can be unreliable on some modules: try the read
+                // anyway and accept only physically plausible values.
+                if raw_ready == Some(1) || scd30_ok {
                     if let Ok((c, t, h)) = scd30.read_measurement() {
-                        let mut d = data2.lock().unwrap();
-                        d.co2 = c;
-                        d.temperature = t;
-                        d.humidity = h;
+                        if (400.0..=10000.0).contains(&c)
+                            && (-40.0..=80.0).contains(&t)
+                            && (0.0..=100.0).contains(&h)
+                        {
+                            let mut d = data2.lock().unwrap();
+                            d.co2 = c;
+                            d.temperature = t;
+                            d.humidity = h;
+                        }
                     }
                 }
 
