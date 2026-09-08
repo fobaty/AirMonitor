@@ -1,4 +1,4 @@
-pub const VERSION: &str = "V2.1";
+pub const VERSION: &str = "V0.1";
 pub const AP_SSID_DEF: &str = "AIR-SCAN-CONFIG";
 pub const AP_PASS_DEF: &str = "12345678";
 pub const WIFI_TIMEOUT_MS: u64 = 10000;
@@ -14,6 +14,14 @@ pub const TFT_RST_PIN: u32 = 3;
 pub const TFT_DC_PIN: u32 = 4;
 pub const TFT_CS_PIN: u32 = 5;
 pub const TFT_BL_PIN: u32 = 6;
+
+// Backlight PWM (LEDC, 10-bit resolution => max duty 1024). Night mode dims the
+// panel so it does not glare in a dark room; defaults are a 23:00-07:00 window.
+pub const BL_FULL_DUTY: u32 = 1024;
+pub const NIGHT_DIM_LEVEL: u32 = 40;
+pub const NIGHT_ON_DEF: bool = false;
+pub const NIGHT_START_H_DEF: i32 = 23;
+pub const NIGHT_END_H_DEF: i32 = 7;
 
 pub const GRAPH_SAMPLES: usize = 60;
 pub const GRAPH_INTERVAL_MS: u64 = 30000;

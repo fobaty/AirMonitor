@@ -38,8 +38,6 @@ pub const BAR_Y: i32 = 146;
 
 type Dc<'d> = PinDriver<'d, esp_idf_hal::gpio::Gpio4, esp_idf_hal::gpio::Output>;
 type Rst<'d> = PinDriver<'d, esp_idf_hal::gpio::Gpio3, esp_idf_hal::gpio::Output>;
-type Bl<'d> = PinDriver<'d, esp_idf_hal::gpio::Gpio6, esp_idf_hal::gpio::Output>;
-
 type SpiT<'d> = SpiDeviceDriver<'d, SpiDriver<'d>>;
 
 pub fn init_tft<'d>(
@@ -47,11 +45,8 @@ pub fn init_tft<'d>(
     cs_pin: esp_idf_hal::gpio::Gpio5,
     dc: Dc<'d>,
     rst: Rst<'d>,
-    mut bl: Bl<'d>,
     rotated: bool,
-) -> Result<(Tft<'d>, Bl<'d>), display_interface::DisplayError> {
-    bl.set_high().ok();
-
+) -> Result<Tft<'d>, display_interface::DisplayError> {
     let spi: SpiT<'d> = SpiDeviceDriver::new(
         driver,
         Some(cs_pin),
@@ -83,7 +78,7 @@ pub fn init_tft<'d>(
         .init(&mut delay)
         .map_err(|_| display_interface::DisplayError::BusWriteError)?;
 
-    Ok((display, bl))
+    Ok(display)
 }
 
 fn font(size: u32) -> &'static MonoFont<'static> {
@@ -282,6 +277,23 @@ pub fn draw_clock(
             .draw(display)
             .ok();
     }
+}
+
+// Blink the clock colon in place without redrawing the digits (avoids flicker).
+// The separator cell starts two digit cells right of the first digit (5 + 2*15).
+pub fn clock_colon_blink(display: &mut Tft, show: bool) {
+    clear_rect(display, 35, 5, 15, 21);
+    if show {
+        draw_glyph(display, glyph_rows(':'), 35, 5, 3, COLOR_CYAN);
+    }
+}
+
+// Blink the uptime LED dot in place.
+pub fn clock_uptime_led(display: &mut Tft, on: bool) {
+    Circle::new(Point::new(120, 11), 2)
+        .into_styled(PrimitiveStyle::with_fill(if on { COLOR_RED } else { COLOR_BLACK }))
+        .draw(display)
+        .ok();
 }
 
 // ─── loop step 6: UI refresh data (every 5s) ───

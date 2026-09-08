@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "air-monitor-rust"
-version = "2.1.0"
+version = "0.1.0"
 dependencies = [
  "display-interface",
  "display-interface-spi",

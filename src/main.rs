@@ -35,6 +35,10 @@ struct AppData {
     wifi_ip: String,
     gmt_off: i32,
     dst_off: i32,
+    night_on: bool,
+    night_sh: i32,
+    night_eh: i32,
+    ap_up: bool,
 }
 
 fn url_decode(s: &str) -> String {
@@ -53,6 +57,29 @@ fn parse_form(body: &str) -> std::collections::HashMap<String, String> {
         }
     }
     params
+}
+
+// True when local hour h falls inside the [sh, eh) night window. sh == eh means
+// "always night" (useful to test dimming), otherwise wrap-around is supported
+// (e.g. 23:00 -> 07:00).
+fn night_dim(h: u32, sh: i32, eh: i32) -> bool {
+    let h = h as i32;
+    if sh == eh {
+        true
+    } else if sh < eh {
+        sh <= h && h < eh
+    } else {
+        h >= sh || h < eh
+    }
+}
+
+fn ap_cfg() -> AccessPointConfiguration {
+    AccessPointConfiguration {
+        ssid: heapless::String::<32>::try_from(config::AP_SSID_DEF).unwrap(),
+        password: heapless::String::<64>::try_from(config::AP_PASS_DEF).unwrap(),
+        auth_method: AuthMethod::WPA2Personal,
+        ..Default::default()
+    }
 }
 
 // Local time (C++ getLocalTime): SystemTime + gmt/dst offsets, validated by year.
@@ -91,6 +118,7 @@ fn main() {
     let store = network::NvsStore::new(nvs.clone());
     let mqtt_cfg = store.load_mqtt();
     let stored = store.get_wifi_list();
+    let (night_on, night_sh, night_eh) = store.get_night();
 
     let data = Arc::new(Mutex::new(AppData {
         co2: 0.0, temperature: 0.0, humidity: 0.0,
@@ -98,23 +126,41 @@ fn main() {
         mqtt_enabled: mqtt_cfg.enabled, mqtt_connected: false,
         wifi_ssid: "AP-Mode".into(), wifi_ip: "192.168.4.1".into(),
         gmt_off: mqtt_cfg.gmt_off, dst_off: mqtt_cfg.dst_off,
+        night_on, night_sh, night_eh,
+        ap_up: true,
     }));
 
-    // ─── TFT Display (ST7735s) + splash (C++ setup order) ─────────
-    let (mut tft, _bl) = {
-        let spi_driver = esp_idf_hal::spi::SpiDriver::new(
+// ─── TFT Display (ST7735s) + splash (C++ setup order) ─────────
+    let (mut tft, bl_pwm, bl_max, _bl_timer) = {
+        let spi_driver = esp_idf_svc::hal::spi::SpiDriver::new(
             peripherals.spi2,
             peripherals.pins.gpio1,
             peripherals.pins.gpio2,
             Option::<AnyIOPin>::None,
-            &esp_idf_hal::spi::config::DriverConfig::new(),
+            &esp_idf_svc::hal::spi::config::DriverConfig::new(),
         ).unwrap();
         let dc = PinDriver::output(peripherals.pins.gpio4).unwrap();
         let rst = PinDriver::output(peripherals.pins.gpio3).unwrap();
-        let bl = PinDriver::output(peripherals.pins.gpio6).unwrap();
+        // Backlight on PWM (LEDC CH0 / TIMER0, 10-bit) so night mode can dim it.
+        // The timer driver must outlive the channel driver: dropping it resets
+        // the timer and would kill the PWM output.
+        let timer = esp_idf_svc::hal::ledc::LedcTimerDriver::new(
+            peripherals.ledc.timer0,
+            &esp_idf_svc::hal::ledc::config::TimerConfig::new()
+                .frequency(5_u32.kHz().into())
+                .resolution(esp_idf_svc::hal::ledc::Resolution::Bits10),
+        ).unwrap();
+        let mut bl_pwm = esp_idf_svc::hal::ledc::LedcDriver::new(
+            peripherals.ledc.channel0,
+            &timer,
+            peripherals.pins.gpio6,
+        ).unwrap();
+        let bl_max = bl_pwm.get_max_duty();
+        bl_pwm.set_duty(bl_max).unwrap();
         let rotated = store.get_display_rot();
         info!("Display rotated_180: {}", rotated);
-        display::init_tft(spi_driver, peripherals.pins.gpio5, dc, rst, bl, rotated).unwrap()
+        let tft = display::init_tft(spi_driver, peripherals.pins.gpio5, dc, rst, rotated).unwrap();
+        (tft, bl_pwm, bl_max, timer)
     };
     display::draw_splash_border(&mut tft, config::VERSION);
     info!("TFT initialized");
@@ -149,7 +195,12 @@ fn main() {
     ));
 
     let mut connected = false;
+    let mut conn_net: Option<(String, String)> = None;
     let mut wifi_row = sy;
+    info!(
+        "WiFi list: {:?}",
+        stored.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>()
+    );
     for (idx, (ssid, pass)) in stored.iter().enumerate() {
         info!("Trying WiFi: {}", ssid);
         let cfg = Configuration::Client(ClientConfiguration {
@@ -160,6 +211,7 @@ fn main() {
         {
             let mut w = wifi.lock().unwrap();
             let _ = w.stop();
+            thread::sleep(Duration::from_millis(200));
             if w.set_configuration(&cfg).is_err() || w.start().is_err() {
                 error!("WiFi config/start failed for {}", ssid);
                 continue;
@@ -187,8 +239,26 @@ fn main() {
 
         if ok_conn {
             connected = true;
-            let w = wifi.lock().unwrap();
-            let ip = w.sta_netif().get_ip_info().map(|i| i.ip.to_string()).unwrap_or_else(|_| "0.0.0.0".into());
+            conn_net = Some((ssid.clone(), pass.clone()));
+            // DHCP address may not be assigned the instant is_connected() turns true.
+            let mut ip = "0.0.0.0".to_string();
+            for _ in 0..5 {
+                let got = wifi
+                    .lock()
+                    .unwrap()
+                    .sta_netif()
+                    .get_ip_info()
+                    .ok()
+                    .map(|i| i.ip.to_string());
+                if let Some(v) = got {
+                    if v != "0.0.0.0" {
+                        ip = v;
+                        break;
+                    }
+                }
+                thread::sleep(Duration::from_millis(200));
+            }
+            info!("WiFi connected, ip={}", ip);
             let mut d = data.lock().unwrap();
             d.wifi_ssid = ssid.clone();
             d.wifi_ip = ip;
@@ -197,11 +267,50 @@ fn main() {
             let _ = store2.save_wifi(ssid, pass);
             break;
         }
+        warn!("WiFi '{}' not connected (timeout)", ssid);
+        wifi.lock().unwrap().disconnect().ok();
         wifi_row += 7;
     }
 
-    if connected {
-        info!("WiFi connected");
+if connected {
+        // Keep the config AP alive alongside STA for the first minute after boot
+        // so settings stay reachable even on a firewalled/isolation LAN.
+        let client_cfg = match &conn_net {
+            Some((ssid, pass)) => ClientConfiguration {
+                ssid: heapless::String::<32>::try_from(ssid.as_str()).unwrap(),
+                password: heapless::String::<64>::try_from(pass.as_str()).unwrap(),
+                ..Default::default()
+            },
+            None => ClientConfiguration::default(),
+        };
+        let ap_cfg = AccessPointConfiguration {
+            ssid: heapless::String::<32>::try_from(config::AP_SSID_DEF).unwrap(),
+            password: heapless::String::<64>::try_from(config::AP_PASS_DEF).unwrap(),
+            auth_method: AuthMethod::WPA2Personal,
+            ..Default::default()
+        };
+        {
+            let mut w = wifi.lock().unwrap();
+            let _ = w.stop();
+            thread::sleep(Duration::from_millis(300));
+            if w.set_configuration(&Configuration::Mixed(client_cfg.clone(), ap_cfg)).is_err() || w.start().is_err() {
+                error!("AP start failed");
+            } else {
+                thread::sleep(Duration::from_millis(500));
+                let ap_ip = w
+                    .ap_netif()
+                    .get_ip_info()
+                    .map(|i| i.ip.to_string())
+                    .unwrap_or_else(|_| "unknown".into());
+                info!("AP Mode: {} ip={} (1-min window)", config::AP_SSID_DEF, ap_ip);
+                // esp_wifi_start does not re-join the STA profile in AP_STA mode,
+                // so drive the connection explicitly to keep internet access.
+                if let Err(e) = w.connect() {
+                    warn!("Mixed STA connect() error: {:?}", e);
+                }
+                info!("Mixed mode: STA reconnect requested");
+            }
+        }
         display::wifi_message(&mut tft, wifi_row, "CONNECTED", display::COLOR_GREEN);
     } else {
         info!("AP Mode: {}", config::AP_SSID_DEF);
@@ -212,17 +321,125 @@ fn main() {
             auth_method: AuthMethod::WPA2Personal,
             ..Default::default()
         };
-        let cfg = Configuration::Mixed(ClientConfiguration::default(), ap_cfg);
+        let ap_cfg2 = if let Some(last) = stored.first() {
+            // Keep a standby STA profile so the AP remains Mixed (scan still works)
+            ClientConfiguration {
+                ssid: heapless::String::<32>::try_from(last.0.as_str()).unwrap(),
+                password: heapless::String::<64>::try_from(last.1.as_str()).unwrap(),
+                ..Default::default()
+            }
+        } else {
+            ClientConfiguration::default()
+        };
+        let cfg = Configuration::Mixed(ap_cfg2, ap_cfg);
         let mut w = wifi.lock().unwrap();
         let _ = w.stop();
+        thread::sleep(Duration::from_millis(300));
         if w.set_configuration(&cfg).is_err() || w.start().is_err() {
             error!("AP start failed");
+        } else {
+            thread::sleep(Duration::from_millis(500));
+            let ap_ip = w
+                .ap_netif()
+                .get_ip_info()
+                .map(|i| i.ip.to_string())
+                .unwrap_or_else(|_| "unknown".into());
+            info!("AP Mode active, ip={}", ap_ip);
+            // Background attempt: keep retrying the standby STA profile while
+            // the AP is up, so the device joins if the network comes back.
+            if let Err(e) = w.connect() {
+                warn!("AP-fallback STA connect() error: {:?}", e);
+            }
         }
         display::wifi_message(&mut tft, wifi_row, "AP MODE ACTIVE", display::COLOR_ORANGE);
     }
 
-    // SNTP time sync (C++ configTime in both branches)
-    let _sntp = EspSntp::new_default().unwrap();
+    // ─── AP watchdog ─────────────────────────────────────────────────
+    // Runtime network policy (matches the old C++ behavior):
+    //   * AP stays up while STA has not been stable-connected for 60 s (covers
+    //     the boot window and any loss of the home network);
+    //   * once STA is stable >= 60 s, drop the AP (STA-only);
+    //   * if STA drops again later, the AP comes right back so the device stays
+    //     reachable for configuration.
+    {
+        let wifi_w = wifi.clone();
+        let data_w = data.clone();
+        let base_profile = conn_net.clone().or_else(|| stored.first().cloned());
+        thread::spawn(move || {
+            let mut ap_up = true; // boot always starts in Mixed (both branches)
+            let boot = Instant::now();
+            let mut sta_since: Option<Instant> = None;
+            loop {
+                thread::sleep(Duration::from_secs(3));
+                let boot_elapsed = boot.elapsed();
+                let conn = wifi_w.lock().unwrap().is_connected().unwrap_or(false);
+                if conn {
+                    if sta_since.is_none() {
+                        sta_since = Some(Instant::now());
+                    }
+                } else {
+                    sta_since = None;
+                }
+                let stable = sta_since
+                    .map(|t| t.elapsed() >= Duration::from_secs(60))
+                    .unwrap_or(false);
+                let want_ap = boot_elapsed < Duration::from_secs(60) || !conn || !stable;
+
+                // Welcome window already elapsed, STA stable -> go STA-only.
+                if ap_up && !want_ap {
+                    let sta_cfg = match &base_profile {
+                        Some((ssid, pass)) => ClientConfiguration {
+                            ssid: heapless::String::<32>::try_from(ssid.as_str()).unwrap(),
+                            password: heapless::String::<64>::try_from(pass.as_str()).unwrap(),
+                            ..Default::default()
+                        },
+                        None => ClientConfiguration::default(),
+                    };
+                    let mut w = wifi_w.lock().unwrap();
+                    let _ = w.stop();
+                    thread::sleep(Duration::from_millis(200));
+                    if w.set_configuration(&Configuration::Client(sta_cfg)).is_err() || w.start().is_err() {
+                        error!("AP teardown failed");
+                    } else {
+                        ap_up = false;
+                        data_w.lock().unwrap().ap_up = false;
+                        info!("AP dropped: STA stable, STA-only");
+                    }
+                } else if !ap_up && want_ap {
+                    let sta_cfg = match &base_profile {
+                        Some((ssid, pass)) => ClientConfiguration {
+                            ssid: heapless::String::<32>::try_from(ssid.as_str()).unwrap(),
+                            password: heapless::String::<64>::try_from(pass.as_str()).unwrap(),
+                            ..Default::default()
+                        },
+                        None => ClientConfiguration::default(),
+                    };
+                    let mut w = wifi_w.lock().unwrap();
+                    let _ = w.stop();
+                    thread::sleep(Duration::from_millis(300));
+                    if w.set_configuration(&Configuration::Mixed(sta_cfg, ap_cfg())).is_err() || w.start().is_err() {
+                        error!("AP restart failed");
+                    } else {
+                        thread::sleep(Duration::from_millis(500));
+                        if let Err(e) = w.connect() {
+                            warn!("AP-restart STA connect() error: {:?}", e);
+                        }
+                        ap_up = true;
+                        data_w.lock().unwrap().ap_up = true;
+                        info!("AP up: STA lost or too fresh");
+                    }
+                }
+            }
+        });
+    }
+
+    // ─── SNTP time sync (C++ configTime in both branches) ─────────────
+    // Callback logs actual sync; servers are pool.ntp.org by default
+    // (esp_idf_svc::sntp::SntpConf::default()).
+    let _sntp = EspSntp::new_with_callback(
+        &esp_idf_svc::sntp::SntpConf::default(),
+        |d| info!("SNTP sync: offset {}s", d.as_secs()),
+    ).unwrap();
 
     // ─── HTTP Server ──────────────────────────────────────────────
     let server_conf = HttpConf {
@@ -249,15 +466,22 @@ fn main() {
             let wifi_ip = {
                 let w = wifi.lock().unwrap();
                 let conn = w.is_connected().unwrap_or(false);
-                let ip = if conn {
-                    w.sta_netif().get_ip_info().map(|i| i.ip.to_string())
+                // Show the AP address only when the AP is actually running
+                // (watchdog keeps data.ap_up in sync), otherwise a stale
+                // cached value would be misleading.
+                let ip_opt: Option<String> = if conn {
+                    w.sta_netif().get_ip_info().ok().map(|i| i.ip.to_string())
+                } else if d.ap_up {
+                    w.ap_netif().get_ip_info().ok().map(|i| i.ip.to_string())
                 } else {
-                    w.ap_netif().get_ip_info().map(|i| i.ip.to_string())
+                    None
                 };
                 if conn {
-                    ip.unwrap_or(d.wifi_ip.clone())
+                    ip_opt.unwrap_or(d.wifi_ip.clone())
+                } else if d.ap_up {
+                    ip_opt.unwrap_or("192.168.4.1".to_string())
                 } else {
-                    ip.unwrap_or("192.168.4.1".to_string())
+                    "no link".to_string()
                 }
             };
             let co2lvl = sensors::co2_level(d.co2);
@@ -265,6 +489,10 @@ fn main() {
             let pm25lvl = sensors::pm_level(d.pm25);
             let pm10lvl = sensors::pm_level(d.pm10);
             let rotated = store_display_rot.get_display_rot();
+            let (n_on, n_sh, n_eh) = {
+                let store2 = network::NvsStore::new(nvs_rot.clone());
+                store2.get_night()
+            };
             let json = format!(
                 concat!(
                     "{{\"co2\":{:.0},\"co2lvl\":\"{}\",\"co2clr\":\"{}\",",
@@ -273,7 +501,7 @@ fn main() {
                     "\"pm10\":{},\"pm10lvl\":\"{}\",\"pm10clr\":\"{}\",",
                     "\"temp\":{},\"hum\":{},\"mq\":\"{}\",\"m_en\":{},",
                     "\"gmt_h\":{},\"dst_s\":{},\"ssid\":\"{}\",\"ip\":\"{}\",",
-                    "\"rot\":{}}}"
+                    "\"rot\":{},\"n_on\":{},\"n_sh\":{},\"n_eh\":{}}}"
                 ),
                 d.co2, co2lvl, sensors::level_color(co2lvl),
                 d.pm1, pm1lvl, sensors::level_color(pm1lvl),
@@ -288,6 +516,9 @@ fn main() {
                 d.wifi_ssid,
                 &wifi_ip,
                 if rotated { 1 } else { 0 },
+                if n_on { 1 } else { 0 },
+                n_sh,
+                n_eh,
             );
             let mut resp = req.into_ok_response()?;
             resp.write_all(json.as_bytes())?;
@@ -387,6 +618,11 @@ fn main() {
             };
             let store = network::NvsStore::new(nvs.clone());
             let _ = store.save_mqtt(&mqtt);
+
+            // Night mode: enabled checkbox + [start, end) hours (0-23).
+            let n_sh = p.get("n_sh").and_then(|v| v.parse::<i32>().ok()).unwrap_or(config::NIGHT_START_H_DEF);
+            let n_eh = p.get("n_eh").and_then(|v| v.parse::<i32>().ok()).unwrap_or(config::NIGHT_END_H_DEF);
+            let _ = store.set_night(p.contains_key("n_on"), n_sh.clamp(0, 23), n_eh.clamp(0, 23));
 
             let mut resp = req.into_ok_response()?;
             resp.write_all(b"Restarting...")?;
@@ -540,7 +776,14 @@ fn main() {
         let data4 = data.clone();
         let wifi4 = wifi.clone();
         thread::spawn(move || {
+            let mut bl_pwm = bl_pwm;
+            let bl_max = bl_max;
+            let _bl_timer = _bl_timer; // keep PWM timer alive for channel driver
             let mut last_bw: i32 = -1;
+            let mut last_duty: u32 = u32::MAX;
+            let mut last_hm: u32 = u32::MAX;
+            let mut last_upmin: u64 = u64::MAX;
+            let mut last_has_time: Option<bool> = None;
             let mut co2_hist = [0i32; config::GRAPH_SAMPLES];
             let mut hist_idx = 0usize;
             let boot = Instant::now();
@@ -578,13 +821,59 @@ fn main() {
                     }
                 }
 
-                // step 5: clock (every 1s)
+                // step 5: clock (every 1s; full redraw only when minute changes)
                 if now.duration_since(last_clock) >= Duration::from_secs(1) {
                     last_clock = now;
                     let uptime_s = now.duration_since(boot).as_secs();
                     let (has_time, h, m, s) = local_hms(gmt_off, dst_off);
-                    let sec = if has_time { s } else { uptime_s as u32 % 60 };
-                    display::draw_clock(&mut tft, has_time, h, m, sec, uptime_s);
+                    if last_has_time != Some(has_time) {
+                        last_has_time = Some(has_time);
+                        if has_time {
+                            info!("Local time acquired (uptime {}s)", uptime_s);
+                        } else {
+                            info!("No time yet (uptime {}s)", uptime_s);
+                        }
+                    }
+                    if has_time {
+                        let hm = h * 100 + m;
+                        if hm != last_hm {
+                            last_hm = hm;
+                            display::draw_clock(&mut tft, true, h, m, s, uptime_s);
+                        } else {
+                            display::clock_colon_blink(&mut tft, s % 2 == 0);
+                        }
+                    } else {
+                        let upmin = uptime_s / 60;
+                        if upmin != last_upmin {
+                            last_upmin = upmin;
+                            display::draw_clock(&mut tft, false, 0, 0, 0, uptime_s);
+                        } else {
+                            display::clock_uptime_led(&mut tft, s % 2 == 0);
+                        }
+                    }
+
+                    // step 5b: night dimming of backlight (only on time change)
+                    let (n_on, n_sh, n_eh) = {
+                        let d = data4.lock().unwrap();
+                        (d.night_on, d.night_sh, d.night_eh)
+                    };
+                    // Fall back to uptime-based hour when no RTC/NTP time yet, so
+                    // the dim schedule still applies after a fresh boot.
+                    let dim = if n_on {
+                        if has_time {
+                            night_dim(h, n_sh, n_eh)
+                        } else {
+                            night_dim((uptime_s / 3600) as u32 % 24, n_sh, n_eh)
+                        }
+                    } else {
+                        false
+                    };
+                    let target = if dim { config::NIGHT_DIM_LEVEL.min(bl_max) } else { bl_max };
+                    if target != last_duty {
+                        last_duty = target;
+                        bl_pwm.set_duty(target).ok();
+                        info!("Backlight duty: {}", target);
+                    }
                 }
 
                 // step 6: refresh data (every 5s)
@@ -593,12 +882,18 @@ fn main() {
                     let (wifi_connected, wifi_ip) = {
                         let w = wifi4.lock().unwrap();
                         let conn = w.is_connected().unwrap_or(false);
-                        let ip = if conn {
-                            w.sta_netif().get_ip_info().map(|i| i.ip.to_string())
-                        } else {
-                            w.ap_netif().get_ip_info().map(|i| i.ip.to_string())
+                        let ap_up = {
+                            let d = data4.lock().unwrap();
+                            d.ap_up
                         };
-                        (conn, ip.unwrap_or("0.0.0.0".into()))
+                        let ip_opt: Option<String> = if conn {
+                            w.sta_netif().get_ip_info().ok().map(|i| i.ip.to_string())
+                        } else if ap_up {
+                            w.ap_netif().get_ip_info().ok().map(|i| i.ip.to_string())
+                        } else {
+                            None
+                        };
+                        (conn, ip_opt.unwrap_or_else(|| "no link".into()))
                     };
                     let ip_str = wifi_ip;
                     display::draw_data(
