@@ -129,8 +129,27 @@ impl NvsStore {
     }
 
     pub fn set_display_rot(&self, rot: bool) -> Result<(), EspError> {
-        let mut nvs = EspNvs::new(self.partition.clone(), "disp", true)?;
+        let nvs = EspNvs::new(self.partition.clone(), "disp", true)?;
         nvs.set_u8("rot", if rot { 1 } else { 0 })
+    }
+
+    // Night mode: dim backlight inside [start_h, end_h). start_h == end_h means
+    // "always dim". Default disabled.
+    pub fn get_night(&self) -> (bool, i32, i32) {
+        if let Ok(nvs) = EspNvs::new(self.partition.clone(), "disp", true) {
+            let on = nvs.get_u8("n_on").ok().flatten().map(|v| v == 1).unwrap_or(crate::config::NIGHT_ON_DEF);
+            let sh = nvs.get_i32("n_sh").ok().flatten().unwrap_or(crate::config::NIGHT_START_H_DEF);
+            let eh = nvs.get_i32("n_eh").ok().flatten().unwrap_or(crate::config::NIGHT_END_H_DEF);
+            return (on, sh, eh);
+        }
+        (crate::config::NIGHT_ON_DEF, crate::config::NIGHT_START_H_DEF, crate::config::NIGHT_END_H_DEF)
+    }
+
+    pub fn set_night(&self, on: bool, sh: i32, eh: i32) -> Result<(), EspError> {
+        let nvs = EspNvs::new(self.partition.clone(), "disp", true)?;
+        nvs.set_u8("n_on", if on { 1 } else { 0 })?;
+        nvs.set_i32("n_sh", sh)?;
+        nvs.set_i32("n_eh", eh)
     }
 }
 

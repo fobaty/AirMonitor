@@ -42,6 +42,10 @@ label { display: block; text-align: left; margin-top: 10px; font-weight: bold; c
 <label>Port:</label><input name="m_port" id="m_port" type="number" placeholder="1883">
 <label>User:</label><input name="m_user" id="m_user" placeholder="Keep current">
 <label>Pass:</label><input name="m_pass" id="m_pass" type="password" placeholder="Keep current">
+<hr>
+<label><input type="checkbox" name="n_on" id="n_on" style="width:auto"> Night mode (dim backlight)</label>
+<label>Start hour (0-23, default 23):</label><input type="number" name="n_sh" id="n_sh" min="0" max="23" step="1" placeholder="23">
+<label>End hour (0-23, default 7):</label><input type="number" name="n_eh" id="n_eh" min="0" max="23" step="1" placeholder="7">
 <button type="submit" class="btn" style="background:#4caf50">Save & Restart</button>
 </form>
 <button class="btn" style="background:none;color:#888" onclick="sh('main-view')">← Back</button>
@@ -60,6 +64,9 @@ if(!window.f){
 document.getElementById("m_en").checked = d.m_en;
 document.getElementById("gmt_h").value = d.gmt_h;
 document.getElementById("dst_en").value = d.dst_s;
+document.getElementById("n_on").checked = (d.n_on == 1);
+document.getElementById("n_sh").value = d.n_sh;
+document.getElementById("n_eh").value = d.n_eh;
 window.f=true;
 }
 });
