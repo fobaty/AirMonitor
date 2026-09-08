@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install espup and ESP-IDF
-        uses: esp-rs/actions/esp-idf-install@v3
+        uses: esp-rs/action-esp-idf-install@v7
         with:
           target: esp32s3
           esp-idf-version: v5.1.2
