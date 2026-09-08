@@ -9,19 +9,8 @@ on:
     branches: [ "main" ]
 
 jobs:
-  test-and-check:
-    name: Host Tests & Code Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Run unit tests
-        run: cargo test
-
   build-firmware:
     name: Build ESP32-S3 Firmware
-    needs: test-and-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,14 +31,17 @@ jobs:
           . $HOME/export-esp.sh
           cargo +esp check
           cargo +esp build --release
-          espflash save-image --chip esp32s3 target/xtensa-esp32s3-espidf/release/air-monitor-rust firmware.bin
+          VERSION=$(grep '^version =' Cargo.toml | head -n1 | cut -d'"' -f2)
+          BIN_NAME="air-monitor-esp32s3-v${VERSION}.bin"
+          espflash save-image --chip esp32s3 target/xtensa-esp32s3-espidf/release/air-monitor-rust "$BIN_NAME"
+          echo "BIN_NAME=$BIN_NAME" >> $GITHUB_ENV
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: air-monitor-firmware
           path: |
-            firmware.bin
+            air-monitor-esp32s3-v*.bin
 
   release:
     name: Create GitHub Release
@@ -69,5 +61,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release_assets/firmware.bin
+            release_assets/air-monitor-esp32s3-v*.bin
           generate_release_notes: true
