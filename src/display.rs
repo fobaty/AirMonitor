@@ -123,7 +123,7 @@ pub fn clear_rect(display: &mut impl DrawTarget<Color = Rgb565>, x: i32, y: i32,
 pub fn draw_splash_border(display: &mut Tft, version: &str) {
     fill_screen(display);
     RoundedRectangle::with_equal_corners(
-        Rectangle::new(Point::new(5, 5), Size::new(118, 38)),
+        Rectangle::new(Point::new(5, 5), Size::new(118, 40)),
         Size::new(8, 8),
     )
     .into_styled(PrimitiveStyle::with_stroke(COLOR_CYAN, 2))
@@ -132,21 +132,21 @@ pub fn draw_splash_border(display: &mut Tft, version: &str) {
 
     Text::new(
         "AIR SCAN",
-        Point::new(22, 13),
+        Point::new(20, 15),
         MonoTextStyle::new(&FONT_9X15_BOLD, COLOR_CYAN),
     )
     .draw(display)
     .ok();
     Text::new(
         version,
-        Point::new(42, 28),
+        Point::new(42, 30),
         MonoTextStyle::new(&FONT_5X7, COLOR_WHITE),
     )
     .draw(display)
     .ok();
     Text::new(
         "SYSTEM CHECK:",
-        Point::new(10, 48),
+        Point::new(10, 52),
         MonoTextStyle::new(&FONT_5X7, COLOR_WHITE),
     )
     .draw(display)
@@ -256,15 +256,15 @@ pub fn draw_clock(
         let h12 = if h % 12 == 0 { 12 } else { h % 12 };
         let sep = if s % 2 == 0 { ':' } else { ' ' };
         let tstr = format!("{:02}{}{:02}", h12, sep, m);
-        let mut gx = 4;
+        let mut gx = 8;
         for ch in tstr.chars() {
-            draw_glyph(display, glyph_rows(ch), gx, 2, 4, COLOR_CYAN);
-            gx += GLYPH_W as i32 * 4 + 1;
+            draw_glyph(display, glyph_rows(ch), gx, 5, 3, COLOR_CYAN);
+            gx += GLYPH_W as i32 * 3;
         }
         let pstr = if h < 12 { "AM" } else { "PM" };
-        let mut px = 104;
+        let mut px = 92;
         for ch in pstr.chars() {
-            draw_glyph(display, glyph_rows(ch), px, 4, 1, COLOR_WHITE);
+            draw_glyph(display, glyph_rows(ch), px, 5, 1, COLOR_WHITE);
             px += GLYPH_W as i32 + 1;
         }
     } else {
@@ -282,9 +282,9 @@ pub fn draw_clock(
 
 // Blink the clock colon in place without redrawing the digits (avoids flicker).
 pub fn clock_colon_blink(display: &mut Tft, show: bool) {
-    clear_rect(display, 4 + 21 * 2 - 1, 2, 21, 28);
+    clear_rect(display, 8 + 15 * 2, 5, 15, 21);
     if show {
-        draw_glyph(display, glyph_rows(':'), 4 + 21 * 2 - 1, 2, 4, COLOR_CYAN);
+        draw_glyph(display, glyph_rows(':'), 8 + 15 * 2, 5, 3, COLOR_CYAN);
     }
 }
 

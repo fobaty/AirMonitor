@@ -174,7 +174,7 @@ fn main() {
     ).unwrap();
     let mut scd30 = sensors::Scd30Sensor::new(i2c_driver);
     let scd30_ok = scd30.init();
-    let mut sy = 58;
+    let mut sy = 62;
     sy = display::splash_check(&mut tft, sy, "SCD30", scd30_ok);
 
     let uart = UartDriver::new(
