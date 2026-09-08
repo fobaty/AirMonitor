@@ -256,13 +256,13 @@ pub fn draw_clock(
         let h12 = if h % 12 == 0 { 12 } else { h % 12 };
         let sep = if s % 2 == 0 { ':' } else { ' ' };
         let tstr = format!("{:02}{}{:02}", h12, sep, m);
-        let mut gx = 8;
+        let mut gx = 6;
         for ch in tstr.chars() {
-            draw_glyph(display, glyph_rows(ch), gx, 5, 3, COLOR_CYAN);
-            gx += GLYPH_W as i32 * 3;
+            draw_glyph(display, glyph_rows(ch), gx, 4, 3, COLOR_CYAN);
+            gx += GLYPH_W as i32 * 3 + 2;
         }
         let pstr = if h < 12 { "AM" } else { "PM" };
-        let mut px = 92;
+        let mut px = 96;
         for ch in pstr.chars() {
             draw_glyph(display, glyph_rows(ch), px, 5, 1, COLOR_WHITE);
             px += GLYPH_W as i32 + 1;
@@ -282,9 +282,10 @@ pub fn draw_clock(
 
 // Blink the clock colon in place without redrawing the digits (avoids flicker).
 pub fn clock_colon_blink(display: &mut Tft, show: bool) {
-    clear_rect(display, 8 + 15 * 2, 5, 15, 21);
+    let colon_x = 6 + (GLYPH_W as i32 * 3 + 2) * 2;
+    clear_rect(display, colon_x, 4, 17, 21);
     if show {
-        draw_glyph(display, glyph_rows(':'), 8 + 15 * 2, 5, 3, COLOR_CYAN);
+        draw_glyph(display, glyph_rows(':'), colon_x, 4, 3, COLOR_CYAN);
     }
 }
 
