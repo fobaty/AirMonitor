@@ -1,0 +1,73 @@
+name: CI & Release
+
+on:
+  push:
+    branches: [ "main" ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-and-check:
+    name: Host Tests & Code Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run unit tests
+        run: cargo test
+
+  build-firmware:
+    name: Build ESP32-S3 Firmware
+    needs: test-and-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install espup and ESP-IDF
+        uses: esp-rs/actions/esp-idf-install@v3
+        with:
+          target: esp32s3
+          esp-idf-version: v5.1.2
+
+      - name: Install ldproxy and espflash
+        run: |
+          cargo install ldproxy
+          cargo install espflash
+
+      - name: Build release binary
+        run: |
+          . $HOME/export-esp.sh
+          cargo +esp check
+          cargo +esp build --release
+          espflash save-image --chip esp32s3 target/xtensa-esp32s3-espidf/release/air-monitor-rust firmware.bin
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: air-monitor-firmware
+          path: |
+            firmware.bin
+
+  release:
+    name: Create GitHub Release
+    needs: build-firmware
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: air-monitor-firmware
+          path: release_assets/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release_assets/firmware.bin
+          generate_release_notes: true
