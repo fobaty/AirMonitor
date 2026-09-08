@@ -25,17 +25,17 @@ pub type Tft<'d> = Display<
 pub const COLOR_BLACK: Rgb565 = Rgb565::BLACK;
 pub const COLOR_WHITE: Rgb565 = Rgb565::WHITE;
 pub const COLOR_GREEN: Rgb565 = Rgb565::new(0, 63, 0);
-pub const COLOR_RED: Rgb565 = Rgb565::new(31, 0, 0);
-pub const COLOR_CYAN: Rgb565 = Rgb565::new(0, 63, 31);
-pub const COLOR_ORANGE: Rgb565 = Rgb565::new(31, 34, 0);
-pub const COLOR_YELLOW: Rgb565 = Rgb565::new(31, 63, 0);
-pub const COLOR_GRAY: Rgb565 = Rgb565::new(14, 59, 15);
+pub const COLOR_RED: Rgb565 = Rgb565::new(0, 0, 31);       // BGR corrected
+pub const COLOR_CYAN: Rgb565 = Rgb565::new(31, 63, 0);     // BGR corrected
+pub const COLOR_ORANGE: Rgb565 = Rgb565::new(0, 34, 31);   // BGR corrected
+pub const COLOR_YELLOW: Rgb565 = Rgb565::new(0, 63, 31);
+pub const COLOR_GRAY: Rgb565 = Rgb565::new(15, 59, 14);
 const GRAPH_BORDER: Rgb565 = Rgb565::new(8, 32, 8);
 const GRAPH_DOTS: Rgb565 = Rgb565::new(0, 31, 0);
 
 pub const TOP_H: i32 = 32;
 pub const BAR_H: i32 = 12;
-pub const BAR_Y: i32 = 146;
+pub const BAR_Y: i32 = 134;
 
 type Dc<'d> = PinDriver<'d, esp_idf_hal::gpio::Gpio4, esp_idf_hal::gpio::Output>;
 type Rst<'d> = PinDriver<'d, esp_idf_hal::gpio::Gpio3, esp_idf_hal::gpio::Output>;
@@ -123,7 +123,7 @@ pub fn clear_rect(display: &mut impl DrawTarget<Color = Rgb565>, x: i32, y: i32,
 pub fn draw_splash_border(display: &mut Tft, version: &str) {
     fill_screen(display);
     RoundedRectangle::with_equal_corners(
-        Rectangle::new(Point::new(5, 5), Size::new(118, 45)),
+        Rectangle::new(Point::new(5, 5), Size::new(118, 38)),
         Size::new(8, 8),
     )
     .into_styled(PrimitiveStyle::with_stroke(COLOR_CYAN, 2))
@@ -132,21 +132,21 @@ pub fn draw_splash_border(display: &mut Tft, version: &str) {
 
     Text::new(
         "AIR SCAN",
-        Point::new(20, 15),
+        Point::new(22, 13),
         MonoTextStyle::new(&FONT_9X15_BOLD, COLOR_CYAN),
     )
     .draw(display)
     .ok();
     Text::new(
         version,
-        Point::new(45, 35),
+        Point::new(42, 28),
         MonoTextStyle::new(&FONT_5X7, COLOR_WHITE),
     )
     .draw(display)
     .ok();
     Text::new(
         "SYSTEM CHECK:",
-        Point::new(10, 70),
+        Point::new(10, 48),
         MonoTextStyle::new(&FONT_5X7, COLOR_WHITE),
     )
     .draw(display)
@@ -256,15 +256,15 @@ pub fn draw_clock(
         let h12 = if h % 12 == 0 { 12 } else { h % 12 };
         let sep = if s % 2 == 0 { ':' } else { ' ' };
         let tstr = format!("{:02}{}{:02}", h12, sep, m);
-        let mut gx = 5;
+        let mut gx = 4;
         for ch in tstr.chars() {
-            draw_glyph(display, glyph_rows(ch), gx, 5, 3, COLOR_CYAN);
-            gx += GLYPH_W as i32 * 3;
+            draw_glyph(display, glyph_rows(ch), gx, 2, 4, COLOR_CYAN);
+            gx += GLYPH_W as i32 * 4 + 1;
         }
         let pstr = if h < 12 { "AM" } else { "PM" };
-        let mut px = 95;
+        let mut px = 104;
         for ch in pstr.chars() {
-            draw_glyph(display, glyph_rows(ch), px, 5, 1, COLOR_WHITE);
+            draw_glyph(display, glyph_rows(ch), px, 4, 1, COLOR_WHITE);
             px += GLYPH_W as i32 + 1;
         }
     } else {
@@ -281,11 +281,10 @@ pub fn draw_clock(
 }
 
 // Blink the clock colon in place without redrawing the digits (avoids flicker).
-// The separator cell starts two digit cells right of the first digit (5 + 2*15).
 pub fn clock_colon_blink(display: &mut Tft, show: bool) {
-    clear_rect(display, 35, 5, 15, 21);
+    clear_rect(display, 4 + 21 * 2 - 1, 2, 21, 28);
     if show {
-        draw_glyph(display, glyph_rows(':'), 35, 5, 3, COLOR_CYAN);
+        draw_glyph(display, glyph_rows(':'), 4 + 21 * 2 - 1, 2, 4, COLOR_CYAN);
     }
 }
 
@@ -328,11 +327,11 @@ pub fn draw_data(
         1, 32, level_rgb(co2_lvl), 1,
     );
 
-    draw_co2_graph(display, 4, 44, 120, 30, co2, co2_hist);
+    draw_co2_graph(display, 4, 42, 120, 28, co2, co2_hist);
 
-    draw_text(display, &format!("T:{:.1}C H:{:.0}%", temp, hum), 1, 79, COLOR_WHITE, 1);
+    draw_text(display, &format!("T:{:.1}C H:{:.0}%", temp, hum), 1, 73, COLOR_WHITE, 1);
 
-    for (y, (lbl, v)) in [(94, ("PM1.0", pm1)), (108, ("PM2.5", pm25)), (122, ("PM10", pm10))] {
+    for (y, (lbl, v)) in [(87, ("PM1.0", pm1)), (101, ("PM2.5", pm25)), (115, ("PM10", pm10))] {
         let lvl = pm_level(v);
         let color = level_rgb(lvl);
         draw_text(display, &format!("{}: {}", lbl, v), 1, y, color, 1);
@@ -347,9 +346,9 @@ pub fn draw_data(
     } else {
         ("M:ERR", COLOR_RED)
     };
-    draw_text(display, ms, 1, 148, mc, 1);
+    draw_text(display, ms, 1, BAR_Y, mc, 1);
     let ip_color = if wifi_connected { COLOR_GRAY } else { COLOR_YELLOW };
-    draw_text(display, &format!(" {}", ip), 26, 148, ip_color, 1);
+    draw_text(display, &format!(" {}", ip), 26, BAR_Y, ip_color, 1);
 }
 
 pub fn draw_co2_graph(
