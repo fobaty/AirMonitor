@@ -15,14 +15,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install espup and ESP-IDF
-        uses: esp-rs/action-esp-idf-install@v7
-        with:
-          target: esp32s3
-          esp-idf-version: v5.1.2
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install ldproxy and espflash
+      - name: Install toolchain and ESP-IDF via espup
         run: |
+          cargo install espup
+          espup install --chip esp32s3 --esp-idf-version v5.1.2
           cargo install ldproxy
           cargo install espflash
 
