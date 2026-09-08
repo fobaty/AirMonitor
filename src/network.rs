@@ -117,6 +117,21 @@ impl NvsStore {
         nvs.set_i32("dst_off", cfg.dst_off)?;
         Ok(())
     }
+
+    // Display rotation: true = panel physically flipped (180°). Default flipped.
+    pub fn get_display_rot(&self) -> bool {
+        if let Ok(nvs) = EspNvs::new(self.partition.clone(), "disp", true) {
+            if let Ok(Some(v)) = nvs.get_u8("rot") {
+                return v == 1;
+            }
+        }
+        true
+    }
+
+    pub fn set_display_rot(&self, rot: bool) -> Result<(), EspError> {
+        let mut nvs = EspNvs::new(self.partition.clone(), "disp", true)?;
+        nvs.set_u8("rot", if rot { 1 } else { 0 })
+    }
 }
 
 pub struct MqttCfg {
