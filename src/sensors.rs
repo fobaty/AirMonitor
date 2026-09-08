@@ -1,6 +1,8 @@
 use esp_idf_hal::i2c::I2cDriver;
 use esp_idf_hal::uart::UartDriver;
 use log::{error, info};
+use std::thread;
+use std::time::Duration;
 
 pub fn pm_level(v: u16) -> &'static str {
     if v <= 12 { "Good" }
@@ -25,7 +27,7 @@ pub fn level_color(lvl: &str) -> &'static str {
     }
 }
 
-fn crc8(data: &[u8]) -> u8 {
+pub fn crc8(data: &[u8]) -> u8 {
     let mut crc = 0xFFu8;
     for &b in data {
         crc ^= b;
@@ -50,6 +52,11 @@ impl<'d> Scd30Sensor<'d> {
     }
 
     pub fn init(&mut self) -> bool {
+        // Soft reset first: some SCD30 builds need it to leave a hung state.
+        let reset = [0xD4, 0x00];
+        let _ = self.i2c.write(0x61, &reset, 1000);
+        thread::sleep(Duration::from_millis(500));
+
         // Set measurement interval to 2 s (0x4600 + CRC) then start periodic measurement (0x0010).
         let interval = [0x46, 0x00, 0x00, 0x02, crc8(&[0x00, 0x02])];
         let start = [0x00, 0x10];
@@ -69,13 +76,19 @@ impl<'d> Scd30Sensor<'d> {
         }
     }
 
+    pub fn read_cmd(&mut self, cmd: &[u8], buf: &mut [u8]) -> Result<(), &'static str> {
+        // Arduino-Wire semantics: write the register, STOP, then a fresh read.
+        // Some SCD30 copies glitch on combined (repeated-start) transactions.
+        self.i2c.write(0x61, cmd, 1000).map_err(|_| "I2C write err")?;
+        self.i2c.read(0x61, buf, 1000).map_err(|_| "I2C read err")
+    }
+
     pub fn raw_data_ready(&mut self) -> Option<u16> {
-        let cmd = [0x02, 0x02];
         let mut buf = [0u8; 3];
-        match self.i2c.write_read(0x61, &cmd, &mut buf, 1000) {
+        match self.read_cmd(&[0x02, 0x02], &mut buf) {
             Ok(_) => Some((buf[0] as u16) << 8 | (buf[1] as u16)),
             Err(e) => {
-                error!("SCD30 data_ready I2C error: {:?}", e);
+                error!("SCD30 data_ready I2C error: {}", e);
                 None
             }
         }
@@ -85,26 +98,25 @@ impl<'d> Scd30Sensor<'d> {
         self.raw_data_ready() == Some(1)
     }
 
-    pub fn read_u16(&mut self, reg: u16) -> Option<(u16, bool)> {
-        let cmd = reg.to_be_bytes();
+    pub fn read_u16_raw(&mut self, reg: u16) -> Option<[u8; 3]> {
         let mut buf = [0u8; 3];
-        self.i2c.write_read(0x61, &cmd, &mut buf, 1000).ok()?;
-        let v = (buf[0] as u16) << 8 | (buf[1] as u16);
-        let crc_ok = crc8(&buf[0..2]) == buf[2];
-        Some((v, crc_ok))
-    }
-
-    pub fn read_measurement_raw(&mut self) -> Option<[u8; 18]> {
-        let cmd = [0x03, 0x00];
-        let mut buf = [0u8; 18];
-        self.i2c.write_read(0x61, &cmd, &mut buf, 1000).ok()?;
+        self.read_cmd(&reg.to_be_bytes(), &mut buf).ok()?;
         Some(buf)
     }
 
+    pub fn scan_bus(&mut self) -> Vec<u8> {
+        let mut found = Vec::new();
+        for a in 0x08u8..=0x77 {
+            if self.i2c.write(a, &[0x00], 50).is_ok() {
+                found.push(a);
+            }
+        }
+        found
+    }
+
     pub fn read_measurement(&mut self) -> Result<(f32, f32, f32), &'static str> {
-        let cmd = [0x03, 0x00];
         let mut buf = [0u8; 18];
-        self.i2c.write_read(0x61, &cmd, &mut buf, 1000).map_err(|_| "I2C read error")?;
+        self.read_cmd(&[0x03, 0x00], &mut buf)?;
 
         fn decode_float(b: &[u8]) -> f32 {
             let u = u32::from_be_bytes([b[0], b[1], b[3], b[4]]);
@@ -115,6 +127,12 @@ impl<'d> Scd30Sensor<'d> {
         let temp = decode_float(&buf[6..12]);
         let hum = decode_float(&buf[12..18]);
         Ok((co2, temp, hum))
+    }
+
+    pub fn read_measurement_raw(&mut self) -> Option<[u8; 18]> {
+        let mut buf = [0u8; 18];
+        self.read_cmd(&[0x03, 0x00], &mut buf).ok()?;
+        Some(buf)
     }
 }
 
