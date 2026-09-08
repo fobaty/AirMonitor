@@ -9,7 +9,7 @@ use embedded_graphics::{
 use esp_idf_hal::{delay::Ets, gpio::PinDriver, spi::{config, SpiConfig, SpiDeviceDriver, SpiDriver}, units::*};
 use mipidsi::{
     models::ST7735s,
-    options::{ColorInversion, ColorOrder, Orientation},
+    options::{ColorInversion, ColorOrder, Orientation, Rotation},
     Builder, Display,
 };
 
@@ -48,6 +48,7 @@ pub fn init_tft<'d>(
     dc: Dc<'d>,
     rst: Rst<'d>,
     mut bl: Bl<'d>,
+    rotated: bool,
 ) -> Result<(Tft<'d>, Bl<'d>), display_interface::DisplayError> {
     bl.set_high().ok();
 
@@ -65,11 +66,18 @@ pub fn init_tft<'d>(
     let di = SPIInterface::new(spi, dc);
     let mut delay = Ets;
 
+    // Panel flipped: content is rotated 180° so it reads upright from the far edge.
+    let orientation = if rotated {
+        Orientation::new().rotate(Rotation::Deg180)
+    } else {
+        Orientation::new()
+    };
+
     let display = Builder::new(ST7735s, di)
         .reset_pin(rst)
         .color_order(ColorOrder::Bgr)
         .invert_colors(ColorInversion::Normal)
-        .orientation(Orientation::new())
+        .orientation(orientation)
         .display_size(128, 160)
         .display_offset(2, 1)
         .init(&mut delay)

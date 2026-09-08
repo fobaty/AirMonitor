@@ -112,7 +112,9 @@ fn main() {
         let dc = PinDriver::output(peripherals.pins.gpio4).unwrap();
         let rst = PinDriver::output(peripherals.pins.gpio3).unwrap();
         let bl = PinDriver::output(peripherals.pins.gpio6).unwrap();
-        display::init_tft(spi_driver, peripherals.pins.gpio5, dc, rst, bl).unwrap()
+        let rotated = store.get_display_rot();
+        info!("Display rotated_180: {}", rotated);
+        display::init_tft(spi_driver, peripherals.pins.gpio5, dc, rst, bl, rotated).unwrap()
     };
     display::draw_splash_border(&mut tft, config::VERSION);
     info!("TFT initialized");
@@ -240,7 +242,9 @@ fn main() {
     {
         let data = data.clone();
         let wifi = wifi.clone();
+        let nvs_rot = nvs.clone();
         server.fn_handler("/status", esp_idf_svc::http::Method::Get, move |req| {
+            let store_display_rot = network::NvsStore::new(nvs_rot.clone());
             let d = data.lock().unwrap();
             let wifi_ip = {
                 let w = wifi.lock().unwrap();
@@ -260,6 +264,7 @@ fn main() {
             let pm1lvl = sensors::pm_level(d.pm1);
             let pm25lvl = sensors::pm_level(d.pm25);
             let pm10lvl = sensors::pm_level(d.pm10);
+            let rotated = store_display_rot.get_display_rot();
             let json = format!(
                 concat!(
                     "{{\"co2\":{:.0},\"co2lvl\":\"{}\",\"co2clr\":\"{}\",",
@@ -267,7 +272,8 @@ fn main() {
                     "\"pm25\":{},\"pm25lvl\":\"{}\",\"pm25clr\":\"{}\",",
                     "\"pm10\":{},\"pm10lvl\":\"{}\",\"pm10clr\":\"{}\",",
                     "\"temp\":{},\"hum\":{},\"mq\":\"{}\",\"m_en\":{},",
-                    "\"gmt_h\":{},\"dst_s\":{},\"ssid\":\"{}\",\"ip\":\"{}\"}}"
+                    "\"gmt_h\":{},\"dst_s\":{},\"ssid\":\"{}\",\"ip\":\"{}\",",
+                    "\"rot\":{}}}"
                 ),
                 d.co2, co2lvl, sensors::level_color(co2lvl),
                 d.pm1, pm1lvl, sensors::level_color(pm1lvl),
@@ -281,6 +287,7 @@ fn main() {
                 d.dst_off,
                 d.wifi_ssid,
                 &wifi_ip,
+                if rotated { 1 } else { 0 },
             );
             let mut resp = req.into_ok_response()?;
             resp.write_all(json.as_bytes())?;
@@ -323,6 +330,24 @@ fn main() {
             store.clear_wifi();
             let mut resp = req.into_ok_response()?;
             resp.write_all(b"Erased. Restarting...")?;
+            thread::sleep(Duration::from_secs(1));
+            unsafe { esp_idf_svc::sys::esp_restart(); }
+        }).unwrap();
+    }
+
+    // GET /rotate — toggle display 180° and reboot
+    {
+        let nvs = nvs.clone();
+        server.fn_handler("/rotate", esp_idf_svc::http::Method::Get, move |req| -> Result<(), esp_idf_svc::io::EspIOError> {
+            let store = network::NvsStore::new(nvs.clone());
+            let next = !store.get_display_rot();
+            let _ = store.set_display_rot(next);
+            let mut resp = req.into_ok_response()?;
+            let msg = format!(
+                "Display: {}. Restarting...",
+                if next { "flipped 180" } else { "normal" }
+            );
+            resp.write_all(msg.as_bytes())?;
             thread::sleep(Duration::from_secs(1));
             unsafe { esp_idf_svc::sys::esp_restart(); }
         }).unwrap();
