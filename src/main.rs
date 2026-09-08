@@ -174,7 +174,7 @@ fn main() {
     ).unwrap();
     let mut scd30 = sensors::Scd30Sensor::new(i2c_driver);
     let scd30_ok = scd30.init();
-    let mut sy = 77;
+    let mut sy = 58;
     sy = display::splash_check(&mut tft, sy, "SCD30", scd30_ok);
 
     let uart = UartDriver::new(
@@ -580,6 +580,65 @@ if connected {
             unsafe { esp_idf_svc::sys::esp_restart(); }
         }).unwrap();
     }
+
+    // GET /ota - HTML page for firmware upload
+    server.fn_handler("/ota", esp_idf_svc::http::Method::Get, move |req| -> Result<(), esp_idf_svc::io::EspIOError> {
+        let html = r#"<!DOCTYPE html><html><head><meta charset="utf-8"><title>OTA Update</title><style>body{font-family:sans-serif;background:#111;color:#eee;text-align:center;padding:40px;}input,button{padding:12px;margin:10px;font-size:16px;background:#222;color:#eee;border:1px solid #444;border-radius:4px;}button{background:#0a0;cursor:pointer;}</style></head><body><h1>AirMonitor OTA Update</h1><input type="file" id="f" accept=".bin"><br><button onclick="upload()">Flash Firmware</button><p id="st"></p><br><a href="/" style="color:#8af">Back</a><script>function upload(){let f=document.getElementById('f').files[0];if(!f)return alert('Select .bin file');let st=document.getElementById('st');st.innerText='Flashing...';let xhr=new XMLHttpRequest();xhr.open('POST','/ota',true);xhr.onload=()=>{st.innerText=xhr.responseText;if(xhr.status===200){setTimeout(()=>location.href='/',5000);}};xhr.send(f);}</script></body></html>"#;
+        let mut resp = req.into_ok_response()?;
+        resp.write_all(html.as_bytes())?;
+        Ok(())
+    }).unwrap();
+
+    // POST /ota - Receive binary and perform OTA update
+    server.fn_handler("/ota", esp_idf_svc::http::Method::Post, move |mut req| -> Result<(), esp_idf_svc::io::EspIOError> {
+        unsafe {
+            let update_partition = esp_idf_svc::sys::esp_ota_get_next_update_partition(std::ptr::null());
+            if update_partition.is_null() {
+                let mut resp = req.into_ok_response()?;
+                resp.write_all(b"OTA partition error")?;
+                return Ok(());
+            }
+            let mut update_handle: esp_idf_svc::sys::esp_ota_handle_t = 0;
+            let err = esp_idf_svc::sys::esp_ota_begin(update_partition, esp_idf_svc::sys::OTA_SIZE_UNKNOWN as usize, &mut update_handle);
+            if err != 0 {
+                let mut resp = req.into_ok_response()?;
+                resp.write_all(b"esp_ota_begin failed")?;
+                return Ok(());
+            }
+
+            let mut buf = vec![0u8; 1024];
+            let mut ok = true;
+            loop {
+                match req.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let err = esp_idf_svc::sys::esp_ota_write(update_handle, buf.as_ptr() as *const _, n as usize);
+                        if err != 0 {
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if !ok || esp_idf_svc::sys::esp_ota_end(update_handle) != 0 {
+                let mut resp = req.into_ok_response()?;
+                resp.write_all(b"OTA write/end failed")?;
+                return Ok(());
+            }
+
+            if esp_idf_svc::sys::esp_ota_set_boot_partition(update_partition) != 0 {
+                let mut resp = req.into_ok_response()?;
+                resp.write_all(b"esp_ota_set_boot_partition failed")?;
+                return Ok(());
+            }
+
+            let mut resp = req.into_ok_response()?;
+            resp.write_all(b"Success! Rebooting...")?;
+            thread::sleep(Duration::from_secs(1));
+            esp_idf_svc::sys::esp_restart();
+        }
+    }).unwrap();
 
     // POST /connect
     {
