@@ -130,27 +130,9 @@ pub fn draw_splash_border(display: &mut Tft, version: &str) {
     .draw(display)
     .ok();
 
-    Text::new(
-        "AIR SCAN",
-        Point::new(20, 15),
-        MonoTextStyle::new(&FONT_9X15_BOLD, COLOR_CYAN),
-    )
-    .draw(display)
-    .ok();
-    Text::new(
-        version,
-        Point::new(42, 30),
-        MonoTextStyle::new(&FONT_5X7, COLOR_WHITE),
-    )
-    .draw(display)
-    .ok();
-    Text::new(
-        "SYSTEM CHECK:",
-        Point::new(10, 52),
-        MonoTextStyle::new(&FONT_5X7, COLOR_WHITE),
-    )
-    .draw(display)
-    .ok();
+    draw_text(display, "AIR SCAN", 20, 10, COLOR_CYAN, 2);
+    draw_text(display, version, 42, 27, COLOR_WHITE, 1);
+    draw_text(display, "SYSTEM CHECK:", 10, 52, COLOR_WHITE, 1);
 }
 
 pub fn splash_check(display: &mut Tft, y: i32, label: &str, ok: bool) -> i32 {
