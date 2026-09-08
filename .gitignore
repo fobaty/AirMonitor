@@ -1,0 +1,6 @@
+/target
+/.embuild
+/sdkconfig
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,22 @@
+[package]
+name = "air-monitor-rust"
+version = "2.1.0"
+authors = ["Fobaty"]
+edition = "2021"
+resolver = "2"
+
+[dependencies]
+log = "0.4"
+esp-idf-svc = { version = "0.50", features = ["critical-section", "experimental"] }
+esp-idf-hal = "0.45"
+embedded-graphics = "0.8"
+mipidsi = "0.8"
+display-interface = "0.5"
+display-interface-spi = "0.5"
+embedded-hal = "1.0"
+embedded-svc = "0.28"
+heapless = "0.8"
+percent-encoding = "2.3"
+
+[build-dependencies]
+embuild = { version = "0.32", features = ["espidf"] }

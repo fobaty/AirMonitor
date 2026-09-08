@@ -1,0 +1,565 @@
+use esp_idf_svc::hal::prelude::*;
+use esp_idf_svc::hal::i2c::{I2cConfig, I2cDriver};
+use esp_idf_svc::hal::uart::{UartConfig, UartDriver};
+use esp_idf_svc::hal::gpio::*;
+use esp_idf_svc::nvs::EspDefaultNvsPartition;
+use esp_idf_svc::eventloop::EspSystemEventLoop;
+use esp_idf_svc::wifi::{AccessPointConfiguration, AuthMethod, ClientConfiguration, Configuration, EspWifi};
+use esp_idf_svc::http::server::{EspHttpServer, Configuration as HttpConf};
+use esp_idf_svc::sntp::EspSntp;
+use esp_idf_svc::mqtt::client::{EspMqttClient, MqttClientConfiguration};
+use embedded_svc::io::Write;
+use embedded_svc::http::Headers;
+use embedded_svc::mqtt::client::{EventPayload, QoS};
+
+use log::*;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+mod config;
+mod sensors;
+mod display;
+mod network;
+
+struct AppData {
+    co2: f32,
+    temperature: f32,
+    humidity: f32,
+    pm1: u16,
+    pm25: u16,
+    pm10: u16,
+    mqtt_enabled: bool,
+    mqtt_connected: bool,
+    wifi_ssid: String,
+    wifi_ip: String,
+    gmt_off: i32,
+    dst_off: i32,
+}
+
+fn url_decode(s: &str) -> String {
+    percent_encoding::percent_decode_str(s.replace('+', " ").as_str())
+        .decode_utf8_lossy()
+        .into_owned()
+}
+
+fn parse_form(body: &str) -> std::collections::HashMap<String, String> {
+    let mut params = std::collections::HashMap::new();
+    for pair in body.split('&') {
+        if let Some((k, v)) = pair.split_once('=') {
+            params.insert(url_decode(k), url_decode(v));
+        } else if !pair.is_empty() {
+            params.insert(url_decode(pair), String::new());
+        }
+    }
+    params
+}
+
+// Local time (C++ getLocalTime): SystemTime + gmt/dst offsets, validated by year.
+fn local_hms(gmt_off: i32, dst_off: i32) -> (bool, u32, u32, u32) {
+    let now_s = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    if now_s == 0 {
+        return (false, 0, 0, 0);
+    }
+    let shifted = now_s + gmt_off as i64 + dst_off as i64;
+    let day = shifted.div_euclid(86400);
+    let year = 1970 + day / 365;
+    let sod = shifted.rem_euclid(86400);
+    if year < 2020 {
+        return (false, 0, 0, 0);
+    }
+    (
+        true,
+        (sod / 3600) as u32,
+        ((sod % 3600) / 60) as u32,
+        (sod % 60) as u32,
+    )
+}
+
+fn main() {
+    esp_idf_svc::sys::link_patches();
+    esp_idf_svc::log::EspLogger::initialize_default();
+    info!("AirMonitor {} starting", config::VERSION);
+
+    let peripherals = Peripherals::take().unwrap();
+    let sys_loop = EspSystemEventLoop::take().unwrap();
+    let nvs = EspDefaultNvsPartition::take().unwrap();
+
+    let store = network::NvsStore::new(nvs.clone());
+    let mqtt_cfg = store.load_mqtt();
+    let stored = store.get_wifi_list();
+
+    let data = Arc::new(Mutex::new(AppData {
+        co2: 0.0, temperature: 0.0, humidity: 0.0,
+        pm1: 0, pm25: 0, pm10: 0,
+        mqtt_enabled: mqtt_cfg.enabled, mqtt_connected: false,
+        wifi_ssid: "AP-Mode".into(), wifi_ip: "192.168.4.1".into(),
+        gmt_off: mqtt_cfg.gmt_off, dst_off: mqtt_cfg.dst_off,
+    }));
+
+    // ─── TFT Display (ST7735s) + splash (C++ setup order) ─────────
+    let (mut tft, _bl) = {
+        let spi_driver = esp_idf_hal::spi::SpiDriver::new(
+            peripherals.spi2,
+            peripherals.pins.gpio1,
+            peripherals.pins.gpio2,
+            Option::<AnyIOPin>::None,
+            &esp_idf_hal::spi::config::DriverConfig::new(),
+        ).unwrap();
+        let dc = PinDriver::output(peripherals.pins.gpio4).unwrap();
+        let rst = PinDriver::output(peripherals.pins.gpio3).unwrap();
+        let bl = PinDriver::output(peripherals.pins.gpio6).unwrap();
+        display::init_tft(spi_driver, peripherals.pins.gpio5, dc, rst, bl).unwrap()
+    };
+    display::draw_splash_border(&mut tft, config::VERSION);
+    info!("TFT initialized");
+
+    // ─── Sensors: SCD30 then PMS5003 (pSt order) ──────────────────
+    let i2c_driver = I2cDriver::new(
+        peripherals.i2c0,
+        peripherals.pins.gpio12,
+        peripherals.pins.gpio13,
+        &I2cConfig::new().baudrate(100_u32.Hz().into()),
+    ).unwrap();
+    let mut scd30 = sensors::Scd30Sensor::new(i2c_driver);
+    let scd30_ok = scd30.init();
+    let mut sy = 77;
+    sy = display::splash_check(&mut tft, sy, "SCD30", scd30_ok);
+
+    let uart = UartDriver::new(
+        peripherals.uart1,
+        peripherals.pins.gpio10,
+        peripherals.pins.gpio11,
+        Option::<AnyIOPin>::None,
+        Option::<AnyIOPin>::None,
+        &UartConfig::new().baudrate(9600.into()),
+    ).unwrap();
+    let mut pms = sensors::PmsSensor::new(uart);
+    sy = display::splash_check(&mut tft, sy, "PMS5003", true);
+
+    // ─── WiFi (C++ connectToStoredWiFi: poll WL_CONNECTED, dots on TFT) ───
+    sy = display::splash_text(&mut tft, " > WiFi: ", sy);
+    let wifi = Arc::new(Mutex::new(
+        EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs.clone())).unwrap()
+    ));
+
+    let mut connected = false;
+    let mut wifi_row = sy;
+    for (idx, (ssid, pass)) in stored.iter().enumerate() {
+        info!("Trying WiFi: {}", ssid);
+        let cfg = Configuration::Client(ClientConfiguration {
+            ssid: heapless::String::<32>::try_from(ssid.as_str()).unwrap(),
+            password: heapless::String::<64>::try_from(pass.as_str()).unwrap(),
+            ..Default::default()
+        });
+        {
+            let mut w = wifi.lock().unwrap();
+            let _ = w.stop();
+            if w.set_configuration(&cfg).is_err() || w.start().is_err() {
+                error!("WiFi config/start failed for {}", ssid);
+                continue;
+            }
+            if let Err(e) = w.connect() {
+                warn!("WiFi connect() queued with error for {}: {:?}", ssid, e);
+            }
+        }
+
+        let mut dots: usize = 0;
+        let start = Instant::now();
+        let mut ok_conn = false;
+        loop {
+            if wifi.lock().unwrap().is_connected().unwrap_or(false) {
+                ok_conn = true;
+                break;
+            }
+            if start.elapsed() >= Duration::from_millis(config::WIFI_TIMEOUT_MS) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(500));
+            dots += 1;
+            display::wifi_attempt(&mut tft, wifi_row, idx as u32 + 1, ssid, dots);
+        }
+
+        if ok_conn {
+            connected = true;
+            let w = wifi.lock().unwrap();
+            let ip = w.sta_netif().get_ip_info().map(|i| i.ip.to_string()).unwrap_or_else(|_| "0.0.0.0".into());
+            let mut d = data.lock().unwrap();
+            d.wifi_ssid = ssid.clone();
+            d.wifi_ip = ip;
+            let nvs2 = nvs.clone();
+            let store2 = network::NvsStore::new(nvs2);
+            let _ = store2.save_wifi(ssid, pass);
+            break;
+        }
+        wifi_row += 7;
+    }
+
+    if connected {
+        info!("WiFi connected");
+        display::wifi_message(&mut tft, wifi_row, "CONNECTED", display::COLOR_GREEN);
+    } else {
+        info!("AP Mode: {}", config::AP_SSID_DEF);
+        // Mixed AP+STA (C++ WIFI_AP_STA) so /scan works while in AP mode
+        let ap_cfg = AccessPointConfiguration {
+            ssid: heapless::String::<32>::try_from(config::AP_SSID_DEF).unwrap(),
+            password: heapless::String::<64>::try_from(config::AP_PASS_DEF).unwrap(),
+            auth_method: AuthMethod::WPA2Personal,
+            ..Default::default()
+        };
+        let cfg = Configuration::Mixed(ClientConfiguration::default(), ap_cfg);
+        let mut w = wifi.lock().unwrap();
+        let _ = w.stop();
+        if w.set_configuration(&cfg).is_err() || w.start().is_err() {
+            error!("AP start failed");
+        }
+        display::wifi_message(&mut tft, wifi_row, "AP MODE ACTIVE", display::COLOR_ORANGE);
+    }
+
+    // SNTP time sync (C++ configTime in both branches)
+    let _sntp = EspSntp::new_default().unwrap();
+
+    // ─── HTTP Server ──────────────────────────────────────────────
+    let server_conf = HttpConf {
+        max_uri_handlers: 8,
+        ..Default::default()
+    };
+    let mut server = EspHttpServer::new(&server_conf).unwrap();
+
+    // GET /
+    server.fn_handler("/", esp_idf_svc::http::Method::Get, |req| {
+        let mut resp = req.into_ok_response()?;
+        resp.write_all(include_str!("index.html").as_bytes())?;
+        Ok::<(), esp_idf_svc::io::EspIOError>(())
+    }).unwrap();
+
+    // GET /status
+    {
+        let data = data.clone();
+        let wifi = wifi.clone();
+        server.fn_handler("/status", esp_idf_svc::http::Method::Get, move |req| {
+            let d = data.lock().unwrap();
+            let wifi_ip = {
+                let w = wifi.lock().unwrap();
+                let conn = w.is_connected().unwrap_or(false);
+                let ip = if conn {
+                    w.sta_netif().get_ip_info().map(|i| i.ip.to_string())
+                } else {
+                    w.ap_netif().get_ip_info().map(|i| i.ip.to_string())
+                };
+                if conn {
+                    ip.unwrap_or(d.wifi_ip.clone())
+                } else {
+                    ip.unwrap_or("192.168.4.1".to_string())
+                }
+            };
+            let co2lvl = sensors::co2_level(d.co2);
+            let pm1lvl = sensors::pm_level(d.pm1);
+            let pm25lvl = sensors::pm_level(d.pm25);
+            let pm10lvl = sensors::pm_level(d.pm10);
+            let json = format!(
+                concat!(
+                    "{{\"co2\":{:.0},\"co2lvl\":\"{}\",\"co2clr\":\"{}\",",
+                    "\"pm1\":{},\"pm1lvl\":\"{}\",\"pm1clr\":\"{}\",",
+                    "\"pm25\":{},\"pm25lvl\":\"{}\",\"pm25clr\":\"{}\",",
+                    "\"pm10\":{},\"pm10lvl\":\"{}\",\"pm10clr\":\"{}\",",
+                    "\"temp\":{},\"hum\":{},\"mq\":\"{}\",\"m_en\":{},",
+                    "\"gmt_h\":{},\"dst_s\":{},\"ssid\":\"{}\",\"ip\":\"{}\"}}"
+                ),
+                d.co2, co2lvl, sensors::level_color(co2lvl),
+                d.pm1, pm1lvl, sensors::level_color(pm1lvl),
+                d.pm25, pm25lvl, sensors::level_color(pm25lvl),
+                d.pm10, pm10lvl, sensors::level_color(pm10lvl),
+                if d.temperature == 0.0 { "null".to_string() } else { format!("{:.1}", d.temperature) },
+                if d.humidity == 0.0 { "null".to_string() } else { format!("{:.0}", d.humidity) },
+                if d.mqtt_enabled { if d.mqtt_connected { "OK" } else { "FAIL" } } else { "OFF" },
+                d.mqtt_enabled,
+                d.gmt_off / 3600,
+                d.dst_off,
+                d.wifi_ssid,
+                &wifi_ip,
+            );
+            let mut resp = req.into_ok_response()?;
+            resp.write_all(json.as_bytes())?;
+            Ok::<(), esp_idf_svc::io::EspIOError>(())
+        }).unwrap();
+    }
+
+    // GET /scan
+    {
+        let wifi = wifi.clone();
+        server.fn_handler("/scan", esp_idf_svc::http::Method::Get, move |req| {
+            let mut w = wifi.lock().unwrap();
+            let mut j = String::from("[");
+            match w.scan() {
+                Ok(networks) => {
+                    for (i, ap) in networks.iter().enumerate() {
+                        if i > 0 { j.push(','); }
+                        j.push_str(&format!(
+                            "{{\"ssid\":\"{}\",\"rssi\":{}}}",
+                            ap.ssid.as_str(), ap.signal_strength
+                        ));
+                    }
+                }
+                Err(e) => {
+                    error!("WiFi scan failed: {:?}", e);
+                }
+            }
+            j.push(']');
+            let mut resp = req.into_ok_response()?;
+            resp.write_all(j.as_bytes())?;
+            Ok::<(), esp_idf_svc::io::EspIOError>(())
+        }).unwrap();
+    }
+
+    // GET /clearwifi
+    {
+        let nvs = nvs.clone();
+        server.fn_handler("/clearwifi", esp_idf_svc::http::Method::Get, move |req| -> Result<(), esp_idf_svc::io::EspIOError> {
+            let store = network::NvsStore::new(nvs.clone());
+            store.clear_wifi();
+            let mut resp = req.into_ok_response()?;
+            resp.write_all(b"Erased. Restarting...")?;
+            thread::sleep(Duration::from_secs(1));
+            unsafe { esp_idf_svc::sys::esp_restart(); }
+        }).unwrap();
+    }
+
+    // POST /connect
+    {
+        let nvs = nvs.clone();
+        server.fn_handler("/connect", esp_idf_svc::http::Method::Post, move |mut req| -> Result<(), esp_idf_svc::io::EspIOError> {
+            let len = req.content_len().unwrap_or(2048) as usize;
+            let mut buf = vec![0u8; len];
+            let mut total = 0;
+            while total < len {
+                match req.read(&mut buf[total..]) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => total += n,
+                }
+            }
+            let body = String::from_utf8_lossy(&buf[..total]);
+            let p = parse_form(&body);
+
+            if let Some(ssid) = p.get("ssid").filter(|s| !s.is_empty()) {
+                let pass = p.get("pass").map(|s| s.as_str()).unwrap_or("");
+                let store = network::NvsStore::new(nvs.clone());
+                let _ = store.save_wifi(ssid, pass);
+            }
+
+            let m_en = p.contains_key("m_en");
+            let mqtt = network::MqttCfg {
+                enabled: m_en,
+                server: p.get("m_srv").cloned().unwrap_or_default(),
+                port: p.get("m_port").and_then(|v| v.parse().ok()).unwrap_or(1883),
+                user: p.get("m_user").cloned().unwrap_or_default(),
+                pass: p.get("m_pass").cloned().unwrap_or_default(),
+                gmt_off: p.get("gmt_h").and_then(|v| v.parse::<i32>().ok()).unwrap_or(0) * 3600,
+                dst_off: p.get("dst_en").and_then(|v| v.parse().ok()).unwrap_or(0),
+            };
+            let store = network::NvsStore::new(nvs.clone());
+            let _ = store.save_mqtt(&mqtt);
+
+            let mut resp = req.into_ok_response()?;
+            resp.write_all(b"Restarting...")?;
+            thread::sleep(Duration::from_secs(1));
+            unsafe { esp_idf_svc::sys::esp_restart(); }
+        }).unwrap();
+    }
+
+    info!("HTTP server started");
+
+    // C++ setup tail: delay(1000) then clear for main UI
+    thread::sleep(Duration::from_millis(1000));
+    display::fill_screen(&mut tft);
+
+    // ─── loop step 2: Systems — sensor thread ─────────────────────
+    {
+        let data2 = data.clone();
+        thread::spawn(move || {
+            let scd30_ok = scd30_ok;
+            let mut last_log = Instant::now();
+            loop {
+                thread::sleep(Duration::from_millis(500));
+
+                let raw_ready = scd30.raw_data_ready();
+                let ready = raw_ready == Some(1);
+                if ready {
+                    if let Ok((c, t, h)) = scd30.read_measurement() {
+                        let mut d = data2.lock().unwrap();
+                        d.co2 = c;
+                        d.temperature = t;
+                        d.humidity = h;
+                    }
+                }
+
+                let (mut pm1, mut pm25, mut pm10) = (0u16, 0u16, 0u16);
+                pms.read_data(&mut pm1, &mut pm25, &mut pm10);
+                if pm25 > 0 {
+                    let mut d = data2.lock().unwrap();
+                    d.pm1 = pm1;
+                    d.pm25 = pm25;
+                    d.pm10 = pm10;
+                }
+
+                if last_log.elapsed() >= Duration::from_secs(10) {
+                    last_log = Instant::now();
+                    let (co2, t, h) = {
+                        let d = data2.lock().unwrap();
+                        (d.co2, d.temperature, d.humidity)
+                    };
+                    info!(
+                        "SENS: scd_ok={} raw_ready={:?} co2={:.0} t={:.1} h={:.0} pm1={} pm2.5={} pm10={}",
+                        scd30_ok, raw_ready, co2, t, h, pm1, pm25, pm10
+                    );
+                }
+            }
+        });
+    }
+
+    // ─── loop step 3: MQTT thread ─────────────────────────────────
+    {
+        let data3 = data.clone();
+        thread::spawn(move || {
+            if !mqtt_cfg.enabled || mqtt_cfg.server.is_empty() {
+                info!("MQTT disabled");
+                return;
+            }
+            let url = format!("mqtt://{}:{}", mqtt_cfg.server, mqtt_cfg.port);
+            let client_id = format!("AirScan-{:08x}", unsafe { esp_idf_svc::sys::esp_random() });
+            let username = if mqtt_cfg.user.is_empty() { None } else { Some(mqtt_cfg.user.as_str()) };
+            let password = if mqtt_cfg.pass.is_empty() { None } else { Some(mqtt_cfg.pass.as_str()) };
+            let mut conf = MqttClientConfiguration::default();
+            conf.client_id = Some(&client_id);
+            conf.username = username;
+            conf.password = password;
+
+            let dc = data3.clone();
+            let client = EspMqttClient::new_cb(&url, &conf, move |ev| {
+                let mut d = dc.lock().unwrap();
+                match ev.payload() {
+                    EventPayload::Connected(_) => d.mqtt_connected = true,
+                    EventPayload::Disconnected => d.mqtt_connected = false,
+                    _ => {}
+                }
+            });
+            let mut client = match client {
+                Ok(c) => c,
+                Err(e) => {
+                    error!("MQTT init failed: {:?}", e);
+                    return;
+                }
+            };
+            info!("MQTT task started");
+
+            let mut last_pub = Instant::now() - Duration::from_secs(config::MQTT_INTERVAL_MS as u64);
+            loop {
+                thread::sleep(Duration::from_millis(500));
+                if !data3.lock().unwrap().mqtt_connected {
+                    continue;
+                }
+                if last_pub.elapsed() < Duration::from_millis(config::MQTT_INTERVAL_MS) {
+                    continue;
+                }
+                last_pub = Instant::now();
+                let (co2, temp, hum, pm1, pm25, pm10) = {
+                    let d = data3.lock().unwrap();
+                    (d.co2, d.temperature, d.humidity, d.pm1, d.pm25, d.pm10)
+                };
+                let payload = format!(
+                    "{{\"co2\":{:.0},\"pm1\":{},\"pm25\":{},\"pm10\":{},\"temp\":{:.1},\"hum\":{:.0}}}",
+                    co2, pm1, pm25, pm10, temp, hum
+                );
+                match client.publish(config::MQTT_TOPIC, QoS::AtMostOnce, false, payload.as_bytes()) {
+                    Ok(_) => info!("MQTT published to {}", config::MQTT_TOPIC),
+                    Err(e) => info!("MQTT publish failed: {:?}", e),
+                }
+            }
+        });
+    }
+
+    // ─── Display loop: C++ loop() order 1 (progress), 4 (graph), 5 (clock), 6 (refresh) ───
+    {
+        let data4 = data.clone();
+        let wifi4 = wifi.clone();
+        thread::spawn(move || {
+            let mut last_bw: i32 = -1;
+            let mut co2_hist = [0i32; config::GRAPH_SAMPLES];
+            let mut hist_idx = 0usize;
+            let boot = Instant::now();
+            let mut last_graph = Instant::now();
+            let mut last_clock = Instant::now() - Duration::from_secs(1);
+            let mut last_update = Instant::now() - Duration::from_millis(config::DISPLAY_UPDATE_INTERVAL_MS);
+            let (gmt_off, dst_off) = {
+                let d = data4.lock().unwrap();
+                (d.gmt_off, d.dst_off)
+            };
+
+            loop {
+                thread::sleep(Duration::from_millis(500));
+                let now = Instant::now();
+
+                // step 1: progress bar (width = elapsed / 5000 ms)
+                let ms_since = now.duration_since(last_update).as_millis() as u32;
+                let bw = ((ms_since * 128) / config::DISPLAY_UPDATE_INTERVAL_MS as u32) as i32;
+                display::draw_progress_bar(&mut tft, bw, &mut last_bw);
+
+                let (co2, temp, hum, pm1, pm25, pm10, m_en, m_con) = {
+                    let d = data4.lock().unwrap();
+                    (d.co2, d.temperature, d.humidity, d.pm1, d.pm25, d.pm10, d.mqtt_enabled, d.mqtt_connected)
+                };
+
+                // step 4: graph logic (every 30s push CO2 into history)
+                if now.duration_since(last_graph) >= Duration::from_millis(config::GRAPH_INTERVAL_MS) {
+                    last_graph = now;
+                    if hist_idx < config::GRAPH_SAMPLES {
+                        co2_hist[hist_idx] = co2 as i32;
+                        hist_idx += 1;
+                    } else {
+                        co2_hist.copy_within(1.., 0);
+                        co2_hist[config::GRAPH_SAMPLES - 1] = co2 as i32;
+                    }
+                }
+
+                // step 5: clock (every 1s)
+                if now.duration_since(last_clock) >= Duration::from_secs(1) {
+                    last_clock = now;
+                    let uptime_s = now.duration_since(boot).as_secs();
+                    let (has_time, h, m, s) = local_hms(gmt_off, dst_off);
+                    let sec = if has_time { s } else { uptime_s as u32 % 60 };
+                    display::draw_clock(&mut tft, has_time, h, m, sec, uptime_s);
+                }
+
+                // step 6: refresh data (every 5s)
+                if now.duration_since(last_update) >= Duration::from_millis(config::DISPLAY_UPDATE_INTERVAL_MS) {
+                    last_update = now;
+                    let (wifi_connected, wifi_ip) = {
+                        let w = wifi4.lock().unwrap();
+                        let conn = w.is_connected().unwrap_or(false);
+                        let ip = if conn {
+                            w.sta_netif().get_ip_info().map(|i| i.ip.to_string())
+                        } else {
+                            w.ap_netif().get_ip_info().map(|i| i.ip.to_string())
+                        };
+                        (conn, ip.unwrap_or("0.0.0.0".into()))
+                    };
+                    let ip_str = wifi_ip;
+                    display::draw_data(
+                        &mut tft,
+                        co2, temp, hum, pm1, pm25, pm10,
+                        m_en, m_con,
+                        wifi_connected,
+                        &ip_str,
+                        &co2_hist,
+                    );
+                }
+            }
+        });
+    }
+
+    info!("Running");
+    loop { thread::sleep(Duration::from_secs(60)); }
+}

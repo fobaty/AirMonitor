@@ -1,0 +1,68 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Air Monitor</title><style>
+body { font-family: sans-serif; text-align: center; background: #eceff1; margin: 0; padding: 10px; }
+.panel { background: white; padding: 20px; border-radius: 16px; display: inline-block; width: 100%; max-width: 400px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-top:10px; }
+.box { padding:12px; margin:8px 0; border-radius:8px; color:white; font-weight: bold; text-align: left; }
+.view { display: none; } .active { display: block; }
+.btn { padding: 12px 20px; background: #607d8b; color: white; border: none; border-radius: 8px; cursor: pointer; width: 100%; margin-top: 10px; font-weight: bold; }
+#scan-res { text-align: left; margin: 10px 0; max-height: 150px; overflow-y: auto; background: #f9f9f9; border-radius: 8px; }
+.net-item { cursor: pointer; padding: 10px; border-bottom: 1px solid #eee; font-size: 14px; }
+.data-row { display: flex; justify-content: space-around; font-size: 1.2em; margin: 15px 0; }
+input, select { width: 90%; padding: 12px; margin: 8px 0; border: 1px solid #ccc; border-radius: 6px; }
+label { display: block; text-align: left; margin-top: 10px; font-weight: bold; color: #455a64; }
+.btn-danger { background: #90a4ae; font-size: 11px; padding: 5px; margin-top: 5px; width: auto; display: inline-block; }
+</style></head><body>
+<div id="main-view" class="panel view active">
+<h2>Air Quality</h2><p id="st-i" style="color:#888;font-size:12px">Loading...</p>
+<div id="c-b" class="box">CO2: --</div>
+<div id="p1-b" class="box">PM1.0: --</div>
+<div id="p25-b" class="box">PM2.5: --</div>
+<div id="p10-b" class="box">PM10: --</div>
+<div class="data-row"><div>🌡️ <span id="t-v">--</span>°C</div><div>💧 <span id="h-v">--</span>%</div></div>
+<button class="btn" onclick="sh('settings-view')">⚙️ Settings</button>
+</div>
+<div id="settings-view" class="panel view">
+<h2>Settings</h2>
+<div style="border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 15px;">
+<button class="btn" style="background:#2196f3; margin-bottom:5px;" onclick="scan()">📡 Scan WiFi</button>
+<button class="btn btn-danger" onclick="if(confirm('Erase all saved WiFi networks?')) { location.href='/clearwifi'; }">🗑️ Reset WiFi List</button>
+</div>
+<div id="scan-res"></div>
+<form action="/connect" method="POST">
+<label>WiFi SSID:</label><input name="ssid" id="ssid" placeholder="New Network SSID">
+<label>WiFi Password:</label><input name="pass" type="password">
+<hr>
+<label>GMT Offset (e.g. 2 or -8):</label><input type="number" name="gmt_h" id="gmt_h" step="1">
+<label>Daylight Saving (DST):</label>
+<select name="dst_en" id="dst_en"><option value="0">Disabled</option><option value="3600">Enabled (+1 Hour)</option></select>
+<hr>
+<label><input type="checkbox" name="m_en" id="m_en" style="width:auto"> Enable MQTT</label>
+<label>Broker IP:</label><input name="m_srv" id="m_srv" placeholder="Current: Saved">
+<label>Port:</label><input name="m_port" id="m_port" type="number" placeholder="1883">
+<label>User:</label><input name="m_user" id="m_user" placeholder="Keep current">
+<label>Pass:</label><input name="m_pass" id="m_pass" type="password" placeholder="Keep current">
+<button type="submit" class="btn" style="background:#4caf50">Save & Restart</button>
+</form>
+<button class="btn" style="background:none;color:#888" onclick="sh('main-view')">← Back</button>
+</div>
+<script>
+function sh(id){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(id).classList.add('active');}
+function update(){
+fetch("/status").then(r=>r.json()).then(d=>{
+document.getElementById("st-i").innerText = d.ssid + " | " + d.ip + " | MQTT: " + d.mq;
+uB("c-b", d.co2, d.co2lvl, d.co2clr, "CO2"); uB("p1-b", d.pm1, d.pm1lvl, d.pm1clr, "PM1.0");
+uB("p25-b", d.pm25, d.pm25lvl, d.pm25clr, "PM2.5"); uB("p10-b", d.pm10, d.pm10lvl, d.pm10clr, "PM10");
+document.getElementById("t-v").innerText = (d.temp != null)? d.temp : "--";
+document.getElementById("h-v").innerText = (d.hum != null)? d.hum : "--";
+if(!window.f){
+document.getElementById("m_en").checked = d.m_en;
+document.getElementById("gmt_h").value = d.gmt_h;
+document.getElementById("dst_en").value = d.dst_s;
+window.f=true;
+}
+});
+}
+function uB(id,v,l,c,n){let e=document.getElementById(id);e.style.background=c;e.innerText=n+": "+v+" ("+l+")";}
+function scan(){let r=document.getElementById("scan-res");r.innerHTML="Scanning...";fetch("/scan").then(r=>r.json()).then(data=>{r.innerHTML="";data.forEach(n=>{let d=document.createElement("div");d.className="net-item";d.innerText=n.ssid+" ("+n.rssi+"dBm)";d.onclick=()=>{document.getElementById("ssid").value=n.ssid;};r.appendChild(d);});});}
+setInterval(update, 5000); update();
+</script></body></html>
