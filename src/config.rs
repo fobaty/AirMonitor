@@ -1,4 +1,4 @@
-pub const VERSION: &str = "V0.1.1";
+pub const VERSION: &str = "V0.1.2";
 pub const AP_SSID_DEF: &str = "AIR-SCAN-CONFIG";
 pub const AP_PASS_DEF: &str = "12345678";
 pub const WIFI_TIMEOUT_MS: u64 = 10000;
