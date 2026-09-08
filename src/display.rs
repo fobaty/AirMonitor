@@ -28,6 +28,7 @@ pub const COLOR_GREEN: Rgb565 = Rgb565::new(0, 63, 0);
 pub const COLOR_RED: Rgb565 = Rgb565::new(31, 0, 0);
 pub const COLOR_CYAN: Rgb565 = Rgb565::new(0, 63, 31);
 pub const COLOR_ORANGE: Rgb565 = Rgb565::new(31, 34, 0);
+pub const COLOR_YELLOW: Rgb565 = Rgb565::new(31, 63, 0);
 pub const COLOR_GRAY: Rgb565 = Rgb565::new(14, 59, 15);
 const GRAPH_BORDER: Rgb565 = Rgb565::new(8, 32, 8);
 const GRAPH_DOTS: Rgb565 = Rgb565::new(0, 31, 0);
@@ -339,19 +340,16 @@ pub fn draw_data(
     }
 
     clear_rect(display, 0, BAR_Y, 128, BAR_H);
-    if wifi_connected {
-        let (ms, mc) = if !m_en {
-            ("M:OFF", COLOR_CYAN)
-        } else if m_con {
-            ("M:OK", COLOR_GREEN)
-        } else {
-            ("M:ERR", COLOR_RED)
-        };
-        draw_text(display, ms, 1, 148, mc, 1);
-        draw_text(display, &format!(" {}", ip), 26, 148, COLOR_GRAY, 1);
+    let (ms, mc) = if !m_en {
+        ("M:OFF", COLOR_CYAN)
+    } else if m_con {
+        ("M:OK", COLOR_GREEN)
     } else {
-        draw_text(display, &format!("AP: {}", ip), 1, 148, COLOR_ORANGE, 1);
-    }
+        ("M:ERR", COLOR_RED)
+    };
+    draw_text(display, ms, 1, 148, mc, 1);
+    let ip_color = if wifi_connected { COLOR_GRAY } else { COLOR_YELLOW };
+    draw_text(display, &format!(" {}", ip), 26, 148, ip_color, 1);
 }
 
 pub fn draw_co2_graph(
