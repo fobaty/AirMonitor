@@ -41,6 +41,7 @@ struct AppData {
     night_eh: i32,
     night_lev: u32,
     ap_up: bool,
+    co2_history: Vec<i32>,
 }
 
 /// Boot-time snapshot of NVS configuration. Read once at startup because NVS is
@@ -154,6 +155,7 @@ fn main() {
         gmt_off: mqtt_cfg.gmt_off, dst_off: mqtt_cfg.dst_off,
         night_on, night_sh, night_eh, night_lev,
         ap_up: true,
+        co2_history: vec![],
     }));
 
 // ─── TFT Display (ST7735s) + splash (C++ setup order) ─────────
@@ -513,6 +515,14 @@ if connected {
             let (n_on, n_sh, n_eh) = (cfg.night_on, cfg.night_sh, cfg.night_eh);
             let saved_mqtt = &cfg.mqtt;
             let saved_wifi_ssid = &cfg.wifi_ssid;
+            let co2_hist_json = {
+                let d = data.lock().unwrap();
+                if d.co2_history.is_empty() {
+                    "[]".to_string()
+                } else {
+                    format!("[{}]", d.co2_history.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","))
+                }
+            };
             let json = format!(
                 concat!(
                     "{{\"co2\":{:.0},\"co2lvl\":\"{}\",\"co2clr\":\"{}\",",
@@ -522,7 +532,7 @@ if connected {
                     "\"temp\":{},\"hum\":{},\"mq\":\"{}\",\"m_en\":{},",
                     "\"gmt_h\":{},\"dst_s\":{},\"ssid\":\"{}\",\"ip\":\"{}\",",
                     "\"rot\":{},\"n_on\":{},\"n_sh\":{},\"n_eh\":{},\"n_lev\":{},\"ver\":\"{}\",",
-                    "\"m_int\":{}}}"
+                    "\"m_int\":{},\"co2_hist\":{}}}"
                 ),
                 d.co2, co2lvl, sensors::level_color(co2lvl),
                 d.pm1, pm1lvl, sensors::level_color(pm1lvl),
@@ -543,6 +553,7 @@ if connected {
                 cfg.night_lev,
                 config::VERSION,
                 saved_mqtt.interval_sec,
+                co2_hist_json,
             );
             let mut resp = req.into_ok_response()?;
             resp.write_all(json.as_bytes())?;
@@ -986,6 +997,8 @@ if connected {
                         co2_hist.copy_within(1.., 0);
                         co2_hist[config::GRAPH_SAMPLES - 1] = co2 as i32;
                     }
+                    let mut d = data4.lock().unwrap();
+                    d.co2_history = co2_hist[..hist_idx].to_vec();
                 }
 
                 // step 5: clock (every 1s; full redraw only when minute changes)

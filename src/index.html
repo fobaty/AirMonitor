@@ -42,7 +42,17 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; v
 <div id="main-view" class="panel view active">
 <h2>Air Quality</h2>
 <div class="sub" id="st-i">Loading...</div>
-<div id="c-b" class="box">CO2: --</div>
+<div id="c-b" class="box" style="cursor:pointer;" onclick="toggleCo2Chart()" title="Click to toggle CO2 chart">CO2: --</div>
+<div id="co2-chart-container" style="display:none; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px; margin:8px 0;">
+<div style="font-size:12px; color:var(--muted); margin-bottom:6px; display:flex; justify-content:space-between;">
+<span>CO2 History (30 min)</span>
+<span id="co2-minmax">min: -- | max: --</span>
+</div>
+<svg id="co2-svg" viewBox="0 0 300 100" style="width:100%; height:100px; display:block;">
+<polygon id="co2-area" fill="var(--accent)" opacity="0.1" points=""></polygon>
+<polyline id="co2-line" fill="none" stroke="var(--accent)" stroke-width="2" points=""></polyline>
+</svg>
+</div>
 <div id="p1-b" class="box">PM1.0: --</div>
 <div id="p25-b" class="box">PM2.5: --</div>
 <div id="p10-b" class="box">PM10: --</div>
@@ -123,6 +133,7 @@ function update(){ fetch("/status").then(r=>r.json()).then(d=>{
 document.getElementById("st-i").innerText = (d.ssid ? d.ssid : "AP") + " | " + d.ip + " | MQTT: " + d.mq;
 uB("c-b", d.co2, d.co2lvl, d.co2clr, "CO2"); uB("p1-b", d.pm1, d.pm1lvl, d.pm1clr, "PM1.0");
 uB("p25-b", d.pm25, d.pm25lvl, d.pm25clr, "PM2.5"); uB("p10-b", d.pm10, d.pm10lvl, d.pm10clr, "PM10");
+if(d.co2_hist) { drawCo2Chart(d.co2_hist); }
 document.getElementById("t-v").innerText = (d.temp != null)? d.temp : "--";
 document.getElementById("h-v").innerText = (d.hum != null)? d.hum : "--";
 document.getElementById("rot-btn").innerText = (d.rot == 1)? "🔄 Rotate Display (now: flipped)" : "🔄 Rotate Display (now: normal)";
@@ -136,6 +147,40 @@ document.getElementById("m_int").value = d.m_int;
 window.f = true; }
 }); }
 function uB(id,v,l,c,n){let e=document.getElementById(id);e.style.background=c;e.innerText=n+": "+v+" ("+l+")";}
+let showCo2Chart = false;
+function toggleCo2Chart() {
+    showCo2Chart = !showCo2Chart;
+    document.getElementById("co2-chart-container").style.display = showCo2Chart ? "block" : "none";
+    if(showCo2Chart && window.lastCo2Hist) {
+        drawCo2Chart(window.lastCo2Hist);
+    }
+}
+function drawCo2Chart(hist) {
+    if(!hist || hist.length === 0) return;
+    window.lastCo2Hist = hist;
+    if(!showCo2Chart) return;
+    let valid = hist.filter(v => v > 0);
+    if(valid.length === 0) return;
+    let min = Math.min(...valid);
+    let max = Math.max(...valid);
+    if(min === max) { min -= 10; max += 10; }
+    let pad = (max - min) * 0.1;
+    min = Math.max(0, min - pad);
+    max = max + pad;
+    document.getElementById("co2-minmax").innerText = "min: " + Math.round(Math.min(...valid)) + " | max: " + Math.round(Math.max(...valid));
+    let w = 300, h = 100;
+    let pts = [];
+    let len = hist.length;
+    for(let i=0; i<len; i++) {
+        let val = hist[i];
+        if(val <= 0) val = min;
+        let x = (i / (Math.max(1, len - 1))) * w;
+        let y = h - ((val - min) / (max - min || 1)) * (h - 10) - 5;
+        pts.push(x.toFixed(1) + "," + y.toFixed(1));
+    }
+    document.getElementById("co2-line").setAttribute("points", pts.join(" "));
+    document.getElementById("co2-area").setAttribute("points", "0," + h + " " + pts.join(" ") + " " + w + "," + h);
+}
 function scan(){let r=document.getElementById("scan-res");r.innerHTML="Scanning...";fetch("/scan").then(r=>r.json()).then(data=>{r.innerHTML="";data.forEach(n=>{let d=document.createElement("div");d.className="net-item";d.innerText=n.ssid+" ("+n.rssi+"dBm)";d.onclick=()=>{document.getElementById("ssid").value=n.ssid;};r.appendChild(d);});});}
 function save(){let f=new FormData();document.querySelectorAll("#settings-view input[name],#settings-view select[name]").forEach(e=>{if(e.type==="checkbox"){if(e.checked)f.append(e.name,"1")}else{f.append(e.name,e.value)}});fetch("/connect",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(f)}).then(r=>r.text()).then(t=>{alert(t);});window.f=false;}
 setInterval(update, 5000); update();
