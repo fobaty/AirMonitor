@@ -58,7 +58,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; v
 <button class="btn" style="background:#2196f3;border-color:#2196f3;" onclick="scan()">Scan Networks</button>
 <div id="scan-res"></div>
 <label>SSID</label><input name="ssid" id="ssid" autocomplete="off" placeholder="Network name">
-<label>Password</label><input name="pass" type="password" autocomplete="off">
+<label>Password</label><input name="pass" type="text" autocomplete="off" placeholder="WiFi password">
 <button class="btn btn-danger" style="margin-top:12px;" onclick="if(confirm('Erase all saved WiFi networks?')){location.href='/clearwifi'}">🗑️ Erase Saved Networks</button>
 </div>
 </details>
@@ -77,11 +77,11 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; v
 <summary>📤 MQTT Broker</summary>
 <div class="card-body">
 <label><input type="checkbox" name="m_en" id="m_en"> Enable MQTT</label>
-<label>Broker host</label><input name="m_srv" id="m_srv" autocomplete="off" placeholder="Current: saved">
+<label>Broker host</label><input name="m_srv" id="m_srv" autocomplete="off" placeholder="e.g. 192.168.1.50">
 <label>Port</label><input name="m_port" id="m_port" type="number" placeholder="1883">
-<label>User</label><input name="m_user" id="m_user" autocomplete="off" placeholder="Keep current">
-<label>Password</label><input name="m_pass" id="m_pass" type="password" autocomplete="off" placeholder="Keep current">
-<div class="hint">Blank user/password keeps the saved values.</div>
+<label>User</label><input name="m_user" id="m_user" autocomplete="off" placeholder="optional">
+<label>Password</label><input name="m_pass" id="m_pass" type="text" autocomplete="off" placeholder="optional">
+<div class="hint">Values shown are what is saved on the device.</div>
 </div>
 </details>
 
@@ -124,9 +124,14 @@ document.getElementById("t-v").innerText = (d.temp != null)? d.temp : "--";
 document.getElementById("h-v").innerText = (d.hum != null)? d.hum : "--";
 document.getElementById("rot-btn").innerText = (d.rot == 1)? "🔄 Rotate Display (now: flipped)" : "🔄 Rotate Display (now: normal)";
 document.getElementById("fw-ver").innerText = "Firmware " + d.ver;
-if(!window.f){ document.getElementById("m_en").checked = d.m_en; document.getElementById("gmt_h").value = d.gmt_h;
+if(!window.f){ document.getElementById("ssid").value = d.ssid.indexOf("AP")>=0 ? "" : d.ssid;
+document.getElementById("pass").value = d.wpass;
+document.getElementById("m_en").checked = d.m_en; document.getElementById("gmt_h").value = d.gmt_h;
 document.getElementById("dst_en").value = d.dst_s; document.getElementById("n_on").checked = (d.n_on == 1);
-document.getElementById("n_sh").value = d.n_sh; document.getElementById("n_eh").value = d.n_eh; window.f = true; }
+document.getElementById("n_sh").value = d.n_sh; document.getElementById("n_eh").value = d.n_eh;
+document.getElementById("m_srv").value = d.m_srv; document.getElementById("m_port").value = d.m_port;
+document.getElementById("m_user").value = d.m_user; document.getElementById("m_pass").value = d.m_pass;
+window.f = true; }
 }); }
 function uB(id,v,l,c,n){let e=document.getElementById(id);e.style.background=c;e.innerText=n+": "+v+" ("+l+")";}
 function scan(){let r=document.getElementById("scan-res");r.innerHTML="Scanning...";fetch("/scan").then(r=>r.json()).then(data=>{r.innerHTML="";data.forEach(n=>{let d=document.createElement("div");d.className="net-item";d.innerText=n.ssid+" ("+n.rssi+"dBm)";d.onclick=()=>{document.getElementById("ssid").value=n.ssid;};r.appendChild(d);});});}

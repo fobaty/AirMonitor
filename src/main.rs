@@ -491,6 +491,15 @@ if connected {
                 let store2 = network::NvsStore::new(nvs_rot.clone());
                 store2.get_night()
             };
+            let saved_mqtt = {
+                let store3 = network::NvsStore::new(nvs_rot.clone());
+                store3.load_mqtt()
+            };
+            let saved_wifi_pass = {
+                let store4 = network::NvsStore::new(nvs_rot.clone());
+                let nets = store4.get_wifi_list();
+                nets.first().map(|(_, p)| p.clone()).unwrap_or_default()
+            };
             let json = format!(
                 concat!(
                     "{{\"co2\":{:.0},\"co2lvl\":\"{}\",\"co2clr\":\"{}\",",
@@ -499,7 +508,8 @@ if connected {
                     "\"pm10\":{},\"pm10lvl\":\"{}\",\"pm10clr\":\"{}\",",
                     "\"temp\":{},\"hum\":{},\"mq\":\"{}\",\"m_en\":{},",
                     "\"gmt_h\":{},\"dst_s\":{},\"ssid\":\"{}\",\"ip\":\"{}\",",
-                    "\"rot\":{},\"n_on\":{},\"n_sh\":{},\"n_eh\":{},\"ver\":\"{}\"}}"
+                    "\"rot\":{},\"n_on\":{},\"n_sh\":{},\"n_eh\":{},\"ver\":\"{}\",",
+                    "\"m_srv\":\"{}\",\"m_port\":{},\"m_user\":\"{}\",\"m_pass\":\"{}\",\"wpass\":\"{}\"}}"
                 ),
                 d.co2, co2lvl, sensors::level_color(co2lvl),
                 d.pm1, pm1lvl, sensors::level_color(pm1lvl),
@@ -518,6 +528,11 @@ if connected {
                 n_sh,
                 n_eh,
                 config::VERSION,
+                saved_mqtt.server,
+                saved_mqtt.port,
+                saved_mqtt.user,
+                saved_mqtt.pass,
+                saved_wifi_pass,
             );
             let mut resp = req.into_ok_response()?;
             resp.write_all(json.as_bytes())?;
