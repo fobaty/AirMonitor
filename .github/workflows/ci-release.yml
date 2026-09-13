@@ -8,6 +8,9 @@ on:
   pull_request:
     branches: [ "main" ]
 
+env:
+  ESP_IDF_VERSION: v5.1.2
+
 jobs:
   build-firmware:
     name: Build ESP32-S3 Firmware
@@ -18,17 +21,31 @@ jobs:
       - name: Setup Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache ESP-IDF toolchain
+        id: cache-esp
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.rustup/toolchains/esp
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.esp
+            ~/.espressif
+          key: esp-${{ runner.os }}-${{ env.ESP_IDF_VERSION }}-${{ hashFiles('sdkconfig.defaults') }}
+          restore-keys: |
+            esp-${{ runner.os }}-
+
       - name: Install toolchain and ESP-IDF via espup
         run: |
-          cargo install espup
+          command -v espup || cargo install espup
+          command -v ldproxy || cargo install ldproxy
+          command -v espflash || cargo install espflash
           espup install
-          cargo install ldproxy
-          cargo install espflash
+          command -v espflash || espflash version
 
       - name: Build release binary
         run: |
           . $HOME/export-esp.sh
-          cargo +esp check
           cargo +esp build --release
           VERSION=$(grep '^version =' Cargo.toml | head -n1 | cut -d'"' -f2)
           BIN_NAME="air-monitor-esp32s3-v${VERSION}.bin"
