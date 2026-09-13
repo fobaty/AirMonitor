@@ -6,26 +6,21 @@ humidity and particulate matter, shows them on a small **ST7735** TFT and
 publishes the readings over Wi-Fi — without any cloud dependencies.
 
 ```
-┌────────────────────────────────────────────────────────┐
-│ ST7735 128x160 TFT Display Layout                      │
-├────────────────────────────────────────────────────────┤
-│ ┌────────────────────────────────────────────────────┐ │
-│ │ AirMonitor V0.1.20              12:34 PM (NTP)     │ │  ← Status header / clock
-│ ├────────────────────────────────────────────────────┤ │
-│ │ CO2: 902 ppm (Good - Green)                        │ │  ← Live CO₂ reading + AQI level
-│ │ ┌────────────────────────────────────────────────┐ │ │  ← CO₂ History Graph Box (120x28 px)
-│ │ │ 2000 ppm ──────────────────────────────────────│ │ │    - Scaled 400–2000 ppm range
-│ │ │          ╭─▄▇█▇▆▄▂ ▂▄▅▇█▇▆▄▂                   │ │ │    - 60 samples (1 sample / 30s)
-│ │ │  400 ppm ······································│ │ │    - Grid/dot baseline markers (every 4px)
-│ │ └────────────────────────────────────────────────┘ │ │    - Green polyline connecting history
-│ │ T: 29.8°C   H: 45%                                 │ │  ← Temperature & Humidity
-│ │ PM1.0: 5    Good                                   │ │  ← Particulate Matter 1.0
-│ │ PM2.5: 7    Good                                   │ │  ← Particulate Matter 2.5
-│ │ PM10:  5    Good                                   │ │  ← Particulate Matter 10
-│ │ M:OK  192.168.1.178                                │ │  ← MQTT status + Local IP address
-│ │ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ │ │  ← 5s data refresh progress bar (cyan)
-│ └────────────────────────────────────────────────────┘ │
-└────────────────────────────────────────────────────────┘
+┌─────────────────────────────┐
+│   AirMonitor V0.1.20        │
+│   ┌───────────────────────┐ │
+│   │ CO2: 902 (Good)       │ │  ← live CO₂ + AQI level
+│   │ ╭─2k ppm────────────╮ │ │  ← CO₂ graph box (120x28 px)
+│   │ │ ╭─▄▇█▇▆▄▂─────────│ │ │    - 60 samples (1 / 30s)
+│   │ │ ╰···400 ppm·······│ │ │    - clamped 400-2000 ppm range
+│   │ ╰───────────────────╯ │ │    - green polyline + baseline dots
+│   │ T:29.8C H:45%         │ │  ← temperature & humidity
+│   │ PM1.0 Good    5       │ │
+│   │ PM2.5 Good    7       │ │
+│   │ PM10  Good    5       │ │
+│   │ M:OK   192.168.1.178  │ │  ← MQTT state + IP
+│   └───────────────────────┘ │
+└─────────────────────────────┘
 ```
 
 ### CO₂ History Graph Details (`display.rs`)
