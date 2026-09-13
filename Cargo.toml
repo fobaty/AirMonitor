@@ -1,6 +1,6 @@
 [package]
 name = "air-monitor-rust"
-version = "0.1.11"
+version = "0.1.12"
 authors = ["Fobaty"]
 edition = "2021"
 resolver = "2"
