@@ -500,9 +500,9 @@ if connected {
                 let store3 = network::NvsStore::new(nvs_rot.clone());
                 store3.load_mqtt()
             };
-            let saved_wifi = {
+            let saved_wifi_ssid = {
                 let store4 = network::NvsStore::new(nvs_rot.clone());
-                store4.get_wifi_list().first().cloned().unwrap_or_default()
+                store4.get_wifi_list().first().map(|(s, _)| s.clone()).unwrap_or_default()
             };
             let json = format!(
                 concat!(
@@ -513,7 +513,7 @@ if connected {
                     "\"temp\":{},\"hum\":{},\"mq\":\"{}\",\"m_en\":{},",
                     "\"gmt_h\":{},\"dst_s\":{},\"ssid\":\"{}\",\"ip\":\"{}\",",
                     "\"rot\":{},\"n_on\":{},\"n_sh\":{},\"n_eh\":{},\"ver\":\"{}\",",
-                    "\"m_srv\":\"{}\",\"m_port\":{},\"m_user\":\"{}\",\"m_pass\":\"{}\",\"wpass\":\"{}\"}}"
+                    "\"m_srv\":\"{}\",\"m_port\":{},\"m_user\":\"{}\"}}"
                 ),
                 d.co2, co2lvl, sensors::level_color(co2lvl),
                 d.pm1, pm1lvl, sensors::level_color(pm1lvl),
@@ -525,7 +525,7 @@ if connected {
                 d.mqtt_enabled,
                 d.gmt_off / 3600,
                 d.dst_off,
-                saved_wifi.0.clone(),
+                saved_wifi_ssid,
                 &wifi_ip,
                 if rotated { 1 } else { 0 },
                 if n_on { 1 } else { 0 },
@@ -535,8 +535,6 @@ if connected {
                 saved_mqtt.server,
                 saved_mqtt.port,
                 saved_mqtt.user,
-                saved_mqtt.pass,
-                saved_wifi.1,
             );
             let mut resp = req.into_ok_response()?;
             resp.write_all(json.as_bytes())?;
