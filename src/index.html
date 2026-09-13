@@ -80,8 +80,9 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; v
 <label>Broker host</label><input name="m_srv" id="m_srv" autocomplete="off" placeholder="Saved value shown here">
 <label>Port</label><input name="m_port" id="m_port" type="number" placeholder="1883">
 <label>User</label><input name="m_user" id="m_user" autocomplete="off" placeholder="optional">
+<label>Publish interval (seconds)</label><input name="m_int" id="m_int" type="number" min="1" placeholder="10">
 <label>Password</label><input name="m_pass" id="m_pass" type="password" autocomplete="off" placeholder="Keep current">
-<div class="hint">Blank password keeps the saved value. Host/Port/User are filled from device.</div>
+<div class="hint">Blank password keeps the saved value. Host/Port/User/Interval are filled from device.</div>
 </div>
 </details>
 
@@ -131,7 +132,7 @@ document.getElementById("dst_en").value = d.dst_s; document.getElementById("n_on
 document.getElementById("n_sh").value = d.n_sh; document.getElementById("n_eh").value = d.n_eh;
 document.getElementById("n_lev").value = d.n_lev;
 document.getElementById("m_srv").value = d.m_srv; document.getElementById("m_port").value = d.m_port;
-document.getElementById("m_user").value = d.m_user;
+document.getElementById("m_user").value = d.m_user; document.getElementById("m_int").value = d.m_int;
 window.f = true; }
 }); }
 function uB(id,v,l,c,n){let e=document.getElementById(id);e.style.background=c;e.innerText=n+": "+v+" ("+l+")";}
