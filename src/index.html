@@ -98,6 +98,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; v
 <label><input type="checkbox" name="n_on" id="n_on"> Dim backlight at night</label>
 <label>Start hour (0-23)</label><input type="number" name="n_sh" id="n_sh" min="0" max="23" step="1" placeholder="23">
 <label>End hour (0-23)</label><input type="number" name="n_eh" id="n_eh" min="0" max="23" step="1" placeholder="7">
+<label>Night brightness (1-1024, lower = darker)</label><input type="number" name="n_lev" id="n_lev" min="1" max="1024" step="1" placeholder="40">
 </div>
 </details>
 
@@ -128,6 +129,7 @@ if(!window.f){ if(document.getElementById("ssid").value === "") document.getElem
 document.getElementById("m_en").checked = d.m_en; document.getElementById("gmt_h").value = d.gmt_h;
 document.getElementById("dst_en").value = d.dst_s; document.getElementById("n_on").checked = (d.n_on == 1);
 document.getElementById("n_sh").value = d.n_sh; document.getElementById("n_eh").value = d.n_eh;
+document.getElementById("n_lev").value = d.n_lev;
 document.getElementById("m_srv").value = d.m_srv; document.getElementById("m_port").value = d.m_port;
 document.getElementById("m_user").value = d.m_user;
 window.f = true; }

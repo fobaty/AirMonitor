@@ -39,6 +39,7 @@ struct AppData {
     night_on: bool,
     night_sh: i32,
     night_eh: i32,
+    night_lev: u32,
     ap_up: bool,
 }
 
@@ -52,6 +53,7 @@ struct Cfg {
     night_on: bool,
     night_sh: i32,
     night_eh: i32,
+    night_lev: u32,
 }
 
 fn url_decode(s: &str) -> String {
@@ -131,7 +133,7 @@ fn main() {
     let store = network::NvsStore::new(nvs.clone());
     let mqtt_cfg = store.load_mqtt();
     let stored = store.get_wifi_list();
-    let (night_on, night_sh, night_eh) = store.get_night();
+    let (night_on, night_sh, night_eh, night_lev) = store.get_night();
     let rotated = store.get_display_rot();
     let cfg = Arc::new(Cfg {
         rotated,
@@ -140,6 +142,7 @@ fn main() {
         night_on,
         night_sh,
         night_eh,
+        night_lev,
     });
 
     let data = Arc::new(Mutex::new(AppData {
@@ -148,7 +151,7 @@ fn main() {
         mqtt_enabled: mqtt_cfg.enabled, mqtt_connected: false,
         wifi_ssid: "AP-Mode".into(), wifi_ip: "192.168.4.1".into(),
         gmt_off: mqtt_cfg.gmt_off, dst_off: mqtt_cfg.dst_off,
-        night_on, night_sh, night_eh,
+        night_on, night_sh, night_eh, night_lev,
         ap_up: true,
     }));
 
@@ -517,7 +520,7 @@ if connected {
                     "\"pm10\":{},\"pm10lvl\":\"{}\",\"pm10clr\":\"{}\",",
                     "\"temp\":{},\"hum\":{},\"mq\":\"{}\",\"m_en\":{},",
                     "\"gmt_h\":{},\"dst_s\":{},\"ssid\":\"{}\",\"ip\":\"{}\",",
-                    "\"rot\":{},\"n_on\":{},\"n_sh\":{},\"n_eh\":{},\"ver\":\"{}\",",
+                    "\"rot\":{},\"n_on\":{},\"n_sh\":{},\"n_eh\":{},\"n_lev\":{},\"ver\":\"{}\",",
                     "\"m_srv\":\"{}\",\"m_port\":{},\"m_user\":\"{}\"}}"
                 ),
                 d.co2, co2lvl, sensors::level_color(co2lvl),
@@ -536,6 +539,7 @@ if connected {
                 if n_on { 1 } else { 0 },
                 n_sh,
                 n_eh,
+                cfg.night_lev,
                 config::VERSION,
                 saved_mqtt.server,
                 saved_mqtt.port,
@@ -727,10 +731,11 @@ if connected {
             let store = network::NvsStore::new(nvs.clone());
             let _ = store.save_mqtt(&mqtt);
 
-            // Night mode: enabled checkbox + [start, end) hours (0-23).
+            // Night mode: enabled checkbox + [start, end) hours (0-23) + dim level.
             let n_sh = p.get("n_sh").and_then(|v| v.parse::<i32>().ok()).unwrap_or(config::NIGHT_START_H_DEF);
             let n_eh = p.get("n_eh").and_then(|v| v.parse::<i32>().ok()).unwrap_or(config::NIGHT_END_H_DEF);
-            let _ = store.set_night(p.contains_key("n_on"), n_sh.clamp(0, 23), n_eh.clamp(0, 23));
+            let n_lev = p.get("n_lev").and_then(|v| v.parse::<u32>().ok()).unwrap_or(config::NIGHT_DIM_LEVEL);
+            let _ = store.set_night(p.contains_key("n_on"), n_sh.clamp(0, 23), n_eh.clamp(0, 23), n_lev.clamp(1, 1024));
 
             let mut resp = req.into_ok_response()?;
             resp.write_all(b"Restarting...")?;
@@ -982,9 +987,9 @@ if connected {
                     }
 
                     // step 5b: night dimming of backlight (only on time change)
-                    let (n_on, n_sh, n_eh) = {
+                    let (n_on, n_sh, n_eh, n_lev) = {
                         let d = data4.lock().unwrap();
-                        (d.night_on, d.night_sh, d.night_eh)
+                        (d.night_on, d.night_sh, d.night_eh, d.night_lev)
                     };
                     // Fall back to uptime-based hour when no RTC/NTP time yet, so
                     // the dim schedule still applies after a fresh boot.
@@ -997,7 +1002,7 @@ if connected {
                     } else {
                         false
                     };
-                    let target = if dim { config::NIGHT_DIM_LEVEL.min(bl_max) } else { bl_max };
+                    let target = if dim { n_lev.min(bl_max).max(1) } else { bl_max };
                     if target != last_duty {
                         last_duty = target;
                         bl_pwm.set_duty(target).ok();
