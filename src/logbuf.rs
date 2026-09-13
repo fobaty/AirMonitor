@@ -7,6 +7,48 @@ const MAX_LINES: usize = 300;
 static LINES: Mutex<Vec<(u64, String)>> = Mutex::new(Vec::new());
 static NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+static CURRENT_GMT: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static CURRENT_DST: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+pub fn set_time_offsets(gmt: i32, dst: i32) {
+    CURRENT_GMT.store(gmt, std::sync::atomic::Ordering::Relaxed);
+    CURRENT_DST.store(dst, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn get_wall_time(gmt_off: i32, dst_off: i32) -> Option<(u32, u32, u32, u32, u32, u32)> {
+    let now_s = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    if now_s == 0 {
+        return None;
+    }
+    let shifted = now_s + gmt_off as i64 + dst_off as i64;
+    let days = shifted.div_euclid(86400);
+    let sod = shifted.rem_euclid(86400);
+    
+    let hour = (sod / 3600) as u32;
+    let minute = ((sod % 3600) / 60) as u32;
+    let second = (sod % 60) as u32;
+
+    let z = days + 719468;
+    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = (yoe as i64) + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = (mp as i32 + if mp < 10 { 3 } else { -9 }) as u32;
+    let y = y + (if m <= 2 { 1 } else { 0 }) as i64;
+
+    if y < 2020 {
+        return None;
+    }
+
+    Some((y as u32, m as u32, d as u32, hour, minute, second))
+}
+
 struct RingLogger;
 
 unsafe impl Send for RingLogger {}
@@ -29,10 +71,18 @@ impl ::log::Log for RingLogger {
 
     fn log(&self, record: &Record) {
         let ts = unsafe { esp_idf_svc::sys::esp_log_timestamp() };
+        let wall = get_wall_time(
+            CURRENT_GMT.load(std::sync::atomic::Ordering::Relaxed),
+            CURRENT_DST.load(std::sync::atomic::Ordering::Relaxed),
+        );
+        let time_str = match wall {
+            Some((y, m, d, hh, mm, ss)) => format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, m, d, hh, mm, ss),
+            None => format!("up {}ms", ts),
+        };
         let line = format!(
-            "{} ({}) {}: {}",
+            "{} [{}] {}: {}",
             marker(record.level()),
-            ts,
+            time_str,
             record.metadata().target(),
             record.args()
         );
