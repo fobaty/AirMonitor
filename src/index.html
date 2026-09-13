@@ -106,9 +106,10 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; v
 <details class="card">
 <summary>🧰 Maintenance</summary>
 <div class="card-body">
-<div style="display:flex;gap:8px;margin-top:10px;">
+<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
 <a href="/ota" class="btn btn-link">📦 Firmware OTA</a>
 <a href="/logs" class="btn btn-link" style="background:#673ab7;border-color:#673ab7;">📋 Monitoring Logs</a>
+<button class="btn btn-danger btn-sm" onclick="if(confirm('Reboot device?')){location.href='/reboot'}">🔄 Reboot</button>
 </div>
 </div>
 </details>
