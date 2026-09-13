@@ -346,6 +346,11 @@ if connected {
                 .map(|i| i.ip.to_string())
                 .unwrap_or_else(|_| "unknown".into());
             info!("AP Mode active, ip={}", ap_ip);
+            {
+                let mut d = data.lock().unwrap();
+                d.wifi_ssid = config::AP_SSID_DEF.to_string();
+                d.wifi_ip = ap_ip.clone();
+            }
             // Background attempt: keep retrying the standby STA profile while
             // the AP is up, so the device joins if the network comes back.
             if let Err(e) = w.connect() {
@@ -1009,8 +1014,11 @@ if connected {
                             d.wifi_ip.clone()
                         };
                         let sta_ip = w.sta_netif().get_ip_info().ok().map(|i| i.ip.to_string()).filter(|v| v != "0.0.0.0");
+                        let ap_ip = w.ap_netif().get_ip_info().ok().map(|i| i.ip.to_string()).filter(|v| v != "0.0.0.0");
 
                         let ip_str = if let Some(ref ip) = sta_ip {
+                            ip.clone()
+                        } else if let Some(ref ip) = ap_ip {
                             ip.clone()
                         } else if !last_ip.is_empty() && last_ip != "0.0.0.0" {
                             last_ip
