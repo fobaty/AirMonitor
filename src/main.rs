@@ -786,11 +786,17 @@ if connected {
     {
         let data3 = data.clone();
         thread::spawn(move || {
-            if !mqtt_cfg.enabled || mqtt_cfg.server.is_empty() {
-                info!("MQTT disabled");
+            if !mqtt_cfg.enabled {
+                info!("MQTT disabled (config)");
+                return;
+            }
+            if mqtt_cfg.server.is_empty() {
+                info!("MQTT enabled but server host is empty - check Settings > MQTT Broker");
                 return;
             }
             let url = format!("mqtt://{}:{}", mqtt_cfg.server, mqtt_cfg.port);
+            info!("MQTT connecting to {} ...", url);
+            let url_for_log = url.clone();
             let client_id = format!("AirScan-{:08x}", unsafe { esp_idf_svc::sys::esp_random() });
             let username = if mqtt_cfg.user.is_empty() { None } else { Some(mqtt_cfg.user.as_str()) };
             let password = if mqtt_cfg.pass.is_empty() { None } else { Some(mqtt_cfg.pass.as_str()) };
@@ -798,13 +804,23 @@ if connected {
             conf.client_id = Some(&client_id);
             conf.username = username;
             conf.password = password;
+            conf.buffer_size = 1024;
 
             let dc = data3.clone();
             let client = EspMqttClient::new_cb(&url, &conf, move |ev| {
-                let mut d = dc.lock().unwrap();
                 match ev.payload() {
-                    EventPayload::Connected(_) => d.mqtt_connected = true,
-                    EventPayload::Disconnected => d.mqtt_connected = false,
+                    EventPayload::Connected(_) => {
+                        info!("MQTT connected to {}", url_for_log);
+                        dc.lock().unwrap().mqtt_connected = true;
+                    }
+                    EventPayload::Disconnected => {
+                        info!("MQTT disconnected");
+                        dc.lock().unwrap().mqtt_connected = false;
+                    }
+                    EventPayload::Error(e) => {
+                        error!("MQTT connection error: {:?}", e);
+                        dc.lock().unwrap().mqtt_connected = false;
+                    }
                     _ => {}
                 }
             });
