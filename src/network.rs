@@ -153,6 +153,7 @@ impl NvsStore {
     }
 }
 
+#[derive(Clone)]
 pub struct MqttCfg {
     pub enabled: bool,
     pub server: String,
