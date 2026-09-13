@@ -130,7 +130,7 @@ pub fn draw_splash_border(display: &mut Tft, version: &str) {
     .draw(display)
     .ok();
 
-    draw_text(display, "AIR SCAN", 20, 10, COLOR_CYAN, 2);
+    draw_text(display, "AIR MONITOR", 14, 10, COLOR_CYAN, 2);
     draw_text(display, version, 42, 27, COLOR_WHITE, 1);
     draw_text(display, "SYSTEM CHECK:", 10, 52, COLOR_WHITE, 1);
 }
