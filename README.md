@@ -7,16 +7,16 @@ publishes the readings over Wi-Fi — without any cloud dependencies.
 
 ```
 ┌─────────────────────────────┐
-│   AirMonitor V0.1.17         │
+│   AirMonitor V0.1.20         │
 │   ┌───────────────────────┐  │
-│   │  CO2: 902 (Good)      │  │  ← live CO₂ + AQI-style level
-│   │  ╭─────────────────╮  │  │  ← scrolling CO₂ graph (60 pts)
-│   │  ╰─────────────────╯  │  │
+│   │  CO2: 902 (Good)      │  │  ← live CO₂ + AQI level
+│   │  ╭─▄▇█▇▆▄▂───────────╮  │  │  ← scrolling CO₂ graph (60 pts)
+│   │  ╰───────────────────╯  │  │
 │   │  T:29.8C H:45%        │  │
-│   │  PM1.0 Good    1      │  │
-│   │  PM2.5 Good    1      │  │
-│   │  PM10  Good    1      │  │
-│   │  M:OFF  192.168.1.178 │  │  ← MQTT state + real IP
+│   │  PM1.0 Good    5      │  │
+│   │  PM2.5 Good    7      │  │
+│   │  PM10  Good    5      │  │
+│   │  M:OK   192.168.1.178 │  │  ← MQTT state + IP
 │   └───────────────────────┘  │
 └─────────────────────────────┘
 ```
