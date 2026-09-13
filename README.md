@@ -6,20 +6,39 @@ humidity and particulate matter, shows them on a small **ST7735** TFT and
 publishes the readings over Wi-Fi — without any cloud dependencies.
 
 ```
-┌─────────────────────────────┐
-│   AirMonitor V0.1.20         │
-│   ┌───────────────────────┐  │
-│   │  CO2: 902 (Good)      │  │  ← live CO₂ + AQI level
-│   │  ╭─▄▇█▇▆▄▂───────────╮  │  │  ← scrolling CO₂ graph (60 pts)
-│   │  ╰───────────────────╯  │  │
-│   │  T:29.8C H:45%        │  │
-│   │  PM1.0 Good    5      │  │
-│   │  PM2.5 Good    7      │  │
-│   │  PM10  Good    5      │  │
-│   │  M:OK   192.168.1.178 │  │  ← MQTT state + IP
-│   └───────────────────────┘  │
-└─────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│ ST7735 128x160 TFT Display Layout                      │
+├────────────────────────────────────────────────────────┤
+│ ┌────────────────────────────────────────────────────┐ │
+│ │ AirMonitor V0.1.20              12:34 PM (NTP)     │ │  ← Status header / clock
+│ ├────────────────────────────────────────────────────┤ │
+│ │ CO2: 902 ppm (Good - Green)                        │ │  ← Live CO₂ reading + AQI level
+│ │ ┌────────────────────────────────────────────────┐ │ │  ← CO₂ History Graph Box (120x28 px)
+│ │ │ 2000 ppm ──────────────────────────────────────│ │ │    - Scaled 400–2000 ppm range
+│ │ │          ╭─▄▇█▇▆▄▂ ▂▄▅▇█▇▆▄▂                   │ │ │    - 60 samples (1 sample / 30s)
+│ │ │  400 ppm ······································│ │ │    - Grid/dot baseline markers (every 4px)
+│ │ └────────────────────────────────────────────────┘ │ │    - Green polyline connecting history
+│ │ T: 29.8°C   H: 45%                                 │ │  ← Temperature & Humidity
+│ │ PM1.0: 5    Good                                   │ │  ← Particulate Matter 1.0
+│ │ PM2.5: 7    Good                                   │ │  ← Particulate Matter 2.5
+│ │ PM10:  5    Good                                   │ │  ← Particulate Matter 10
+│ │ M:OK  192.168.1.178                                │ │  ← MQTT status + Local IP address
+│ │ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ │ │  ← 5s data refresh progress bar (cyan)
+│ └────────────────────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────┘
 ```
+
+### CO₂ History Graph Details (`display.rs`)
+
+- **Box Dimensions:** Rendered within a boxed viewport of `120 × 28` pixels (`x=4, y=44`), outlined with `GRAPH_BORDER`.
+- **Rolling Time Window:** Maintains a ring buffer of **60 sample points** (`co2_hist[60]`), with a new sample pushed every **30 seconds** (total history window: **30 minutes**).
+- **Value Clamping & Scaling:**
+  - Readings are clamped between **400 ppm** (graph bottom baseline) and **2000 ppm** (graph top boundary).
+  - Linear vertical mapping: `((clamped - 400) / 1600) * (height - 4)`.
+- **Rendering Elements:**
+  - **Baseline Dots:** Background dot markers (`·`) plotted horizontally every 4 pixels across the graph base.
+  - **Trend Polyline:** Connected line segments (`Line::new`) rendered in bright green (`COLOR_GREEN`) linking consecutive sample points.
+  - **Zero-Sentinel Protection:** Uninitialized or empty history slots (`0`) act as sentinels, stopping the polyline rendering so only valid recorded data is displayed.
 
 ## Features
 
