@@ -75,6 +75,7 @@ impl NvsStore {
         let mut pass = String::new();
         let mut gmt = 0i32;
         let mut dst = 0i32;
+        let mut interval_sec = 10i32;
 
         if let Ok(nvs) = EspNvs::new(self.partition.clone(), "mqtt-conf", true) {
             if let Ok(Some(v)) = nvs.get_u8("m_en") {
@@ -101,9 +102,12 @@ impl NvsStore {
             if let Ok(Some(d)) = nvs.get_i32("dst_off") {
                 dst = d;
             }
+            if let Ok(Some(i)) = nvs.get_i32("m_int") {
+                interval_sec = i;
+            }
         }
 
-        MqttCfg { enabled, server, port, user, pass, gmt_off: gmt, dst_off: dst }
+        MqttCfg { enabled, server, port, user, pass, gmt_off: gmt, dst_off: dst, interval_sec: interval_sec.max(1) }
     }
 
     pub fn save_mqtt(&self, cfg: &MqttCfg) -> Result<(), EspError> {
@@ -115,6 +119,7 @@ impl NvsStore {
         nvs.set_str("m_pass", &cfg.pass)?;
         nvs.set_i32("gmt_off", cfg.gmt_off)?;
         nvs.set_i32("dst_off", cfg.dst_off)?;
+        nvs.set_i32("m_int", cfg.interval_sec.max(1))?;
         Ok(())
     }
 
@@ -164,4 +169,5 @@ pub struct MqttCfg {
     pub pass: String,
     pub gmt_off: i32,
     pub dst_off: i32,
+    pub interval_sec: i32,
 }

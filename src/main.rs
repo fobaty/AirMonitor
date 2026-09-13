@@ -521,7 +521,7 @@ if connected {
                     "\"temp\":{},\"hum\":{},\"mq\":\"{}\",\"m_en\":{},",
                     "\"gmt_h\":{},\"dst_s\":{},\"ssid\":\"{}\",\"ip\":\"{}\",",
                     "\"rot\":{},\"n_on\":{},\"n_sh\":{},\"n_eh\":{},\"n_lev\":{},\"ver\":\"{}\",",
-                    "\"m_srv\":\"{}\",\"m_port\":{},\"m_user\":\"{}\"}}"
+                    "\"m_srv\":\"{}\",\"m_port\":{},\"m_user\":\"{}\",\"m_int\":{}}}"
                 ),
                 d.co2, co2lvl, sensors::level_color(co2lvl),
                 d.pm1, pm1lvl, sensors::level_color(pm1lvl),
@@ -544,6 +544,7 @@ if connected {
                 saved_mqtt.server,
                 saved_mqtt.port,
                 saved_mqtt.user,
+                saved_mqtt.interval_sec,
             );
             let mut resp = req.into_ok_response()?;
             resp.write_all(json.as_bytes())?;
@@ -727,14 +728,18 @@ if connected {
                 store.load_mqtt()
             };
             let m_en = p.contains_key("m_en");
-            let mqtt = network::MqttCfg {
+let mqtt = network::MqttCfg {
                 enabled: m_en,
                 server: p.get("m_srv").cloned().unwrap_or_default(),
                 port: p.get("m_port").and_then(|v| v.parse().ok()).unwrap_or(1883),
                 user: p.get("m_user").cloned().unwrap_or_default(),
-                pass: p.get("m_pass").cloned().unwrap_or_default(),
+                pass: {
+                    let pw = p.get("m_pass").map(|s| s.as_str()).unwrap_or("");
+                    if pw.is_empty() { prev.pass } else { pw.to_string() }
+                },
                 gmt_off: p.get("gmt_h").and_then(|v| v.parse::<i32>().ok()).unwrap_or(0) * 3600,
-                dst_off: p.get("dst_en").and_then(|v| v.parse().ok()).unwrap_or(0),
+                dst_off: p.get("dst_en").and_then(|v| v.parse::<i32>().ok()).unwrap_or(0),
+                interval_sec: p.get("m_int").and_then(|v| v.parse::<i32>().ok()).unwrap_or(10).max(1),
             };
             let mqtt = network::MqttCfg {
                 enabled: mqtt.enabled,
@@ -896,13 +901,13 @@ if connected {
             };
             info!("MQTT task started");
 
-            let mut last_pub = Instant::now() - Duration::from_secs(config::MQTT_INTERVAL_MS as u64);
+            let mut last_pub = Instant::now() - Duration::from_secs(cfg.mqtt.interval_sec as u64);
             loop {
                 thread::sleep(Duration::from_millis(500));
                 if !data3.lock().unwrap().mqtt_connected {
                     continue;
                 }
-                if last_pub.elapsed() < Duration::from_millis(config::MQTT_INTERVAL_MS) {
+                if last_pub.elapsed() < Duration::from_secs(cfg.mqtt.interval_sec as u64) {
                     continue;
                 }
                 last_pub = Instant::now();
