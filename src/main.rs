@@ -723,34 +723,37 @@ if connected {
                 info!("POST /connect: wifi saved ssid={}", ssid);
             }
 
-            let prev = {
-                let store = network::NvsStore::new(nvs.clone());
-                store.load_mqtt()
-            };
-            let m_en = p.contains_key("m_en");
-let mqtt = network::MqttCfg {
-                enabled: m_en,
-                server: p.get("m_srv").cloned().unwrap_or_default(),
-                port: p.get("m_port").and_then(|v| v.parse().ok()).unwrap_or(1883),
-                user: p.get("m_user").cloned().unwrap_or_default(),
-                pass: {
-                    let pw = p.get("m_pass").map(|s| s.as_str()).unwrap_or("");
-                    if pw.is_empty() { prev.pass } else { pw.to_string() }
-                },
-                gmt_off: p.get("gmt_h").and_then(|v| v.parse::<i32>().ok()).unwrap_or(0) * 3600,
-                dst_off: p.get("dst_en").and_then(|v| v.parse::<i32>().ok()).unwrap_or(0),
-                interval_sec: p.get("m_int").and_then(|v| v.parse::<i32>().ok()).unwrap_or(10).max(1),
-            };
-            let mqtt = network::MqttCfg {
-                enabled: mqtt.enabled,
-                server: if mqtt.server.is_empty() { prev.server } else { mqtt.server },
-                port: if mqtt.port <= 0 { prev.port } else { mqtt.port },
-                user: if mqtt.user.is_empty() { prev.user } else { mqtt.user },
-                pass: if mqtt.pass.is_empty() { prev.pass } else { mqtt.pass },
-                gmt_off: mqtt.gmt_off,
-                dst_off: mqtt.dst_off,
-                interval_sec: if mqtt.interval_sec <= 0 { prev.interval_sec } else { mqtt.interval_sec },
-            };
+             let prev = {
+                 let store = network::NvsStore::new(nvs.clone());
+                 store.load_mqtt()
+             };
+             let prev_pass = prev.pass.clone();
+             let prev_server = prev.server.clone();
+             let prev_user = prev.user.clone();
+             let m_en = p.contains_key("m_en");
+             let mqtt = network::MqttCfg {
+                 enabled: m_en,
+                 server: p.get("m_srv").cloned().unwrap_or_default(),
+                 port: p.get("m_port").and_then(|v| v.parse().ok()).unwrap_or(1883),
+                 user: p.get("m_user").cloned().unwrap_or_default(),
+                 pass: {
+                     let pw = p.get("m_pass").map(|s| s.as_str()).unwrap_or("");
+                     if pw.is_empty() { prev_pass } else { pw.to_string() }
+                 },
+                 gmt_off: p.get("gmt_h").and_then(|v| v.parse::<i32>().ok()).unwrap_or(0) * 3600,
+                 dst_off: p.get("dst_en").and_then(|v| v.parse::<i32>().ok()).unwrap_or(0),
+                 interval_sec: p.get("m_int").and_then(|v| v.parse::<i32>().ok()).unwrap_or(10).max(1),
+             };
+             let mqtt = network::MqttCfg {
+                 enabled: mqtt.enabled,
+                 server: if mqtt.server.is_empty() { prev_server } else { mqtt.server },
+                 port: if mqtt.port <= 0 { prev.port } else { mqtt.port },
+                 user: if mqtt.user.is_empty() { prev_user } else { mqtt.user },
+                 pass: mqtt.pass,
+                 gmt_off: mqtt.gmt_off,
+                 dst_off: mqtt.dst_off,
+                 interval_sec: mqtt.interval_sec,
+             };
             let store = network::NvsStore::new(nvs.clone());
             let _ = store.save_mqtt(&mqtt);
 
