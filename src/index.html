@@ -2,12 +2,13 @@
 <title>Air Monitor</title><style>
 :root { --bg:#0b0f14; --surface:#161b22; --surface2:#1d2430; --border:#2d333b; --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --green:#3fb950; --orange:#d29922; --red:#f85149; }
 * { box-sizing: border-box; }
-body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 12px; }
+body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 16px; display: flex; flex-direction: column; align-items: center; }
 .nav { display: flex; gap: 8px; justify-content: center; margin-bottom: 12px; }
 .nav button { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 18px; font-size: 15px; cursor: pointer; font-weight: 600; }
 .nav button.active { background: var(--accent); color:#0b0f14; border-color: var(--accent); }
 .panel { background: var(--surface); padding: 18px; border-radius: 16px; width: 100%; max-width: 440px; box-shadow: 0 4px 15px rgba(0,0,0,0.4); text-align: left; }
 .view { display: none; } .active { display: block; }
+#fw-ver { margin-top: 12px; color: var(--muted); font-size: 11px; text-align: center; }
 h2 { margin: 0 0 12px; font-size: 20px; }
 .sub { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
 .box { padding: 12px; margin: 8px 0; border-radius: 8px; color: #fff; font-weight: 700; text-align: left; }
@@ -122,6 +123,7 @@ uB("p25-b", d.pm25, d.pm25lvl, d.pm25clr, "PM2.5"); uB("p10-b", d.pm10, d.pm10lv
 document.getElementById("t-v").innerText = (d.temp != null)? d.temp : "--";
 document.getElementById("h-v").innerText = (d.hum != null)? d.hum : "--";
 document.getElementById("rot-btn").innerText = (d.rot == 1)? "🔄 Rotate Display (now: flipped)" : "🔄 Rotate Display (now: normal)";
+document.getElementById("fw-ver").innerText = "Firmware " + d.ver;
 if(!window.f){ document.getElementById("m_en").checked = d.m_en; document.getElementById("gmt_h").value = d.gmt_h;
 document.getElementById("dst_en").value = d.dst_s; document.getElementById("n_on").checked = (d.n_on == 1);
 document.getElementById("n_sh").value = d.n_sh; document.getElementById("n_eh").value = d.n_eh; window.f = true; }
@@ -130,4 +132,5 @@ function uB(id,v,l,c,n){let e=document.getElementById(id);e.style.background=c;e
 function scan(){let r=document.getElementById("scan-res");r.innerHTML="Scanning...";fetch("/scan").then(r=>r.json()).then(data=>{r.innerHTML="";data.forEach(n=>{let d=document.createElement("div");d.className="net-item";d.innerText=n.ssid+" ("+n.rssi+"dBm)";d.onclick=()=>{document.getElementById("ssid").value=n.ssid;};r.appendChild(d);});});}
 function save(){let f=new FormData();document.querySelectorAll("#settings-view input[name],#settings-view select[name]").forEach(e=>{if(e.type==="checkbox"){if(e.checked)f.append(e.name,"1")}else{f.append(e.name,e.value)}});fetch("/connect",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(f)}).then(r=>r.text()).then(t=>{alert(t);});window.f=false;}
 setInterval(update, 5000); update();
-</script></body></html>
+</script><div id="fw-ver">v--</div>
+</body></html>

@@ -499,7 +499,7 @@ if connected {
                     "\"pm10\":{},\"pm10lvl\":\"{}\",\"pm10clr\":\"{}\",",
                     "\"temp\":{},\"hum\":{},\"mq\":\"{}\",\"m_en\":{},",
                     "\"gmt_h\":{},\"dst_s\":{},\"ssid\":\"{}\",\"ip\":\"{}\",",
-                    "\"rot\":{},\"n_on\":{},\"n_sh\":{},\"n_eh\":{}}}"
+                    "\"rot\":{},\"n_on\":{},\"n_sh\":{},\"n_eh\":{},\"ver\":\"{}\"}}"
                 ),
                 d.co2, co2lvl, sensors::level_color(co2lvl),
                 d.pm1, pm1lvl, sensors::level_color(pm1lvl),
@@ -517,6 +517,7 @@ if connected {
                 if n_on { 1 } else { 0 },
                 n_sh,
                 n_eh,
+                config::VERSION,
             );
             let mut resp = req.into_ok_response()?;
             resp.write_all(json.as_bytes())?;
