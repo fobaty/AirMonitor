@@ -683,12 +683,21 @@ if connected {
             info!("POST /connect: len={} total={} ssid={:?} has_pass={}", len, total, p.get("ssid").map(|s| s.as_str()), p.contains_key("pass"));
 
             if let Some(ssid) = p.get("ssid").filter(|s| !s.is_empty()) {
+                let ctx = network::NvsStore::new(nvs.clone());
                 let pass = p.get("pass").map(|s| s.as_str()).unwrap_or("");
-                let store = network::NvsStore::new(nvs.clone());
-                let _ = store.save_wifi(ssid, pass);
+                let pass = if pass.is_empty() {
+                    ctx.get_wifi_list().iter().find(|(s, _)| s == ssid).map(|(_, pw)| pw.clone()).unwrap_or_default()
+                } else {
+                    pass.to_string()
+                };
+                let _ = ctx.save_wifi(ssid, &pass);
                 info!("POST /connect: wifi saved ssid={}", ssid);
             }
 
+            let prev = {
+                let store = network::NvsStore::new(nvs.clone());
+                store.load_mqtt()
+            };
             let m_en = p.contains_key("m_en");
             let mqtt = network::MqttCfg {
                 enabled: m_en,
@@ -698,6 +707,15 @@ if connected {
                 pass: p.get("m_pass").cloned().unwrap_or_default(),
                 gmt_off: p.get("gmt_h").and_then(|v| v.parse::<i32>().ok()).unwrap_or(0) * 3600,
                 dst_off: p.get("dst_en").and_then(|v| v.parse().ok()).unwrap_or(0),
+            };
+            let mqtt = network::MqttCfg {
+                enabled: mqtt.enabled,
+                server: if mqtt.server.is_empty() { prev.server } else { mqtt.server },
+                port: if mqtt.port <= 0 { prev.port } else { mqtt.port },
+                user: if mqtt.user.is_empty() { prev.user } else { mqtt.user },
+                pass: if mqtt.pass.is_empty() { prev.pass } else { mqtt.pass },
+                gmt_off: mqtt.gmt_off,
+                dst_off: mqtt.dst_off,
             };
             let store = network::NvsStore::new(nvs.clone());
             let _ = store.save_mqtt(&mqtt);
