@@ -500,10 +500,9 @@ if connected {
                 let store3 = network::NvsStore::new(nvs_rot.clone());
                 store3.load_mqtt()
             };
-            let saved_wifi_pass = {
+            let saved_wifi = {
                 let store4 = network::NvsStore::new(nvs_rot.clone());
-                let nets = store4.get_wifi_list();
-                nets.first().map(|(_, p)| p.clone()).unwrap_or_default()
+                store4.get_wifi_list().first().cloned().unwrap_or_default()
             };
             let json = format!(
                 concat!(
@@ -526,7 +525,7 @@ if connected {
                 d.mqtt_enabled,
                 d.gmt_off / 3600,
                 d.dst_off,
-                d.wifi_ssid,
+                saved_wifi.0.clone(),
                 &wifi_ip,
                 if rotated { 1 } else { 0 },
                 if n_on { 1 } else { 0 },
@@ -537,7 +536,7 @@ if connected {
                 saved_mqtt.port,
                 saved_mqtt.user,
                 saved_mqtt.pass,
-                saved_wifi_pass,
+                saved_wifi.1,
             );
             let mut resp = req.into_ok_response()?;
             resp.write_all(json.as_bytes())?;
