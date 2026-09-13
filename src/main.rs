@@ -42,6 +42,18 @@ struct AppData {
     ap_up: bool,
 }
 
+/// Boot-time snapshot of NVS configuration. Read once at startup because NVS is
+/// only written via /connect, after which the device restarts. Keeping this in
+/// RAM avoids reopening the NVS partition on every /status poll.
+struct Cfg {
+    rotated: bool,
+    mqtt: network::MqttCfg,
+    wifi_ssid: String,
+    night_on: bool,
+    night_sh: i32,
+    night_eh: i32,
+}
+
 fn url_decode(s: &str) -> String {
     percent_encoding::percent_decode_str(s.replace('+', " ").as_str())
         .decode_utf8_lossy()
@@ -120,6 +132,15 @@ fn main() {
     let mqtt_cfg = store.load_mqtt();
     let stored = store.get_wifi_list();
     let (night_on, night_sh, night_eh) = store.get_night();
+    let rotated = store.get_display_rot();
+    let cfg = Arc::new(Cfg {
+        rotated,
+        mqtt: mqtt_cfg.clone(),
+        wifi_ssid: stored.first().map(|(s, _)| s.clone()).unwrap_or_default(),
+        night_on,
+        night_sh,
+        night_eh,
+    });
 
     let data = Arc::new(Mutex::new(AppData {
         co2: 0.0, temperature: 0.0, humidity: 0.0,
@@ -158,7 +179,6 @@ fn main() {
         ).unwrap();
         let bl_max = bl_pwm.get_max_duty();
         bl_pwm.set_duty(bl_max).unwrap();
-        let rotated = store.get_display_rot();
         info!("Display rotated_180: {}", rotated);
         let tft = display::init_tft(spi_driver, peripherals.pins.gpio5, dc, rst, rotated).unwrap();
         (tft, bl_pwm, bl_max, timer)
@@ -412,9 +432,7 @@ if connected {
                 if ap_up {
                     if !in_window && stable_since {
                         let mut w = wifi_w.lock().unwrap();
-                        let _ = w.stop();
-                        thread::sleep(Duration::from_millis(200));
-                        if w.set_configuration(&Configuration::Client(sta_cfg())).is_err() || w.start().is_err() {
+                        if w.set_configuration(&Configuration::Client(sta_cfg())).is_err() {
                             error!("AP teardown failed");
                         } else {
                             ap_up = false;
@@ -424,12 +442,9 @@ if connected {
                     }
                 } else if !in_window && lost_long {
                     let mut w = wifi_w.lock().unwrap();
-                    let _ = w.stop();
-                    thread::sleep(Duration::from_millis(300));
-                    if w.set_configuration(&Configuration::Mixed(sta_cfg(), ap_cfg())).is_err() || w.start().is_err() {
+                    if w.set_configuration(&Configuration::Mixed(sta_cfg(), ap_cfg())).is_err() {
                         error!("AP restart failed");
                     } else {
-                        thread::sleep(Duration::from_millis(500));
                         if let Err(e) = w.connect() {
                             warn!("AP-restart STA connect() error: {:?}", e);
                         }
@@ -468,9 +483,8 @@ if connected {
     {
         let data = data.clone();
         let wifi = wifi.clone();
-        let nvs_rot = nvs.clone();
+        let cfg = cfg.clone();
         server.fn_handler("/status", esp_idf_svc::http::Method::Get, move |req| {
-            let store_display_rot = network::NvsStore::new(nvs_rot.clone());
             let d = data.lock().unwrap();
             let wifi_ip = {
                 let w = wifi.lock().unwrap();
@@ -491,19 +505,10 @@ if connected {
             let pm1lvl = sensors::pm_level(d.pm1);
             let pm25lvl = sensors::pm_level(d.pm25);
             let pm10lvl = sensors::pm_level(d.pm10);
-            let rotated = store_display_rot.get_display_rot();
-            let (n_on, n_sh, n_eh) = {
-                let store2 = network::NvsStore::new(nvs_rot.clone());
-                store2.get_night()
-            };
-            let saved_mqtt = {
-                let store3 = network::NvsStore::new(nvs_rot.clone());
-                store3.load_mqtt()
-            };
-            let saved_wifi_ssid = {
-                let store4 = network::NvsStore::new(nvs_rot.clone());
-                store4.get_wifi_list().first().map(|(s, _)| s.clone()).unwrap_or_default()
-            };
+            let rotated = cfg.rotated;
+            let (n_on, n_sh, n_eh) = (cfg.night_on, cfg.night_sh, cfg.night_eh);
+            let saved_mqtt = &cfg.mqtt;
+            let saved_wifi_ssid = &cfg.wifi_ssid;
             let json = format!(
                 concat!(
                     "{{\"co2\":{:.0},\"co2lvl\":\"{}\",\"co2clr\":\"{}\",",
