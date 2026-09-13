@@ -515,13 +515,10 @@ if connected {
             let (n_on, n_sh, n_eh) = (cfg.night_on, cfg.night_sh, cfg.night_eh);
             let saved_mqtt = &cfg.mqtt;
             let saved_wifi_ssid = &cfg.wifi_ssid;
-            let co2_hist_json = {
-                let d = data.lock().unwrap();
-                if d.co2_history.is_empty() {
-                    "[]".to_string()
-                } else {
-                    format!("[{}]", d.co2_history.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","))
-                }
+            let co2_hist_json = if d.co2_history.is_empty() {
+                "[]".to_string()
+            } else {
+                format!("[{}]", d.co2_history.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","))
             };
             let json = format!(
                 concat!(
