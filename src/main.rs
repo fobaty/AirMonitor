@@ -21,6 +21,7 @@ mod config;
 mod sensors;
 mod display;
 mod network;
+mod logbuf;
 
 struct AppData {
     co2: f32,
@@ -108,7 +109,7 @@ fn local_hms(gmt_off: i32, dst_off: i32) -> (bool, u32, u32, u32) {
 
 fn main() {
     esp_idf_svc::sys::link_patches();
-    esp_idf_svc::log::EspLogger::initialize_default();
+    logbuf::init();
     info!("AirMonitor {} starting", config::VERSION);
 
     let peripherals = Peripherals::take().unwrap();
@@ -562,6 +563,13 @@ if connected {
             unsafe { esp_idf_svc::sys::esp_restart(); }
         }).unwrap();
     }
+
+    // GET /logs — recent log lines captured in RAM ring buffer
+    server.fn_handler("/logs", esp_idf_svc::http::Method::Get, move |req| -> Result<(), esp_idf_svc::io::EspIOError> {
+        let mut resp = req.into_ok_response()?;
+        resp.write_all(logbuf::page().as_bytes())?;
+        Ok(())
+    }).unwrap();
 
     // GET /rotate — toggle display 180° and reboot
     {
