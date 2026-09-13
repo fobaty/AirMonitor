@@ -749,6 +749,7 @@ let mqtt = network::MqttCfg {
                 pass: if mqtt.pass.is_empty() { prev.pass } else { mqtt.pass },
                 gmt_off: mqtt.gmt_off,
                 dst_off: mqtt.dst_off,
+                interval_sec: if mqtt.interval_sec <= 0 { prev.interval_sec } else { mqtt.interval_sec },
             };
             let store = network::NvsStore::new(nvs.clone());
             let _ = store.save_mqtt(&mqtt);
