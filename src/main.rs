@@ -447,7 +447,7 @@ if connected {
 
     // ─── HTTP Server ──────────────────────────────────────────────
     let server_conf = HttpConf {
-        max_uri_handlers: 8,
+        max_uri_handlers: 20,
         ..Default::default()
     };
     let mut server = EspHttpServer::new(&server_conf).unwrap();
@@ -652,10 +652,11 @@ if connected {
     {
         let nvs = nvs.clone();
         server.fn_handler("/connect", esp_idf_svc::http::Method::Post, move |mut req| -> Result<(), esp_idf_svc::io::EspIOError> {
+            info!("POST /connect: hit");
             let len = req.content_len().unwrap_or(2048) as usize;
-            let mut buf = vec![0u8; len];
+            let mut buf = vec![0u8; len.min(4096)];
             let mut total = 0;
-            while total < len {
+            while total < buf.len() {
                 match req.read(&mut buf[total..]) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => total += n,
@@ -663,11 +664,13 @@ if connected {
             }
             let body = String::from_utf8_lossy(&buf[..total]);
             let p = parse_form(&body);
+            info!("POST /connect: len={} total={} ssid={:?} has_pass={}", len, total, p.get("ssid").map(|s| s.as_str()), p.contains_key("pass"));
 
             if let Some(ssid) = p.get("ssid").filter(|s| !s.is_empty()) {
                 let pass = p.get("pass").map(|s| s.as_str()).unwrap_or("");
                 let store = network::NvsStore::new(nvs.clone());
                 let _ = store.save_wifi(ssid, pass);
+                info!("POST /connect: wifi saved ssid={}", ssid);
             }
 
             let m_en = p.contains_key("m_en");
@@ -690,8 +693,13 @@ if connected {
 
             let mut resp = req.into_ok_response()?;
             resp.write_all(b"Restarting...")?;
-            thread::sleep(Duration::from_secs(1));
-            unsafe { esp_idf_svc::sys::esp_restart(); }
+            drop(resp);
+            info!("POST /connect: response sent, restart scheduled");
+            thread::spawn(move || {
+                thread::sleep(Duration::from_secs(2));
+                unsafe { esp_idf_svc::sys::esp_restart(); }
+            });
+            Ok(())
         }).unwrap();
     }
 

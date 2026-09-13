@@ -1,79 +1,133 @@
 <!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Air Monitor</title><style>
-body { font-family: sans-serif; text-align: center; background: #eceff1; margin: 0; padding: 10px; }
-.panel { background: white; padding: 20px; border-radius: 16px; display: inline-block; width: 100%; max-width: 400px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-top:10px; }
-.box { padding:12px; margin:8px 0; border-radius:8px; color:white; font-weight: bold; text-align: left; }
+:root { --bg:#0b0f14; --surface:#161b22; --surface2:#1d2430; --border:#2d333b; --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --green:#3fb950; --orange:#d29922; --red:#f85149; }
+* { box-sizing: border-box; }
+body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 12px; }
+.nav { display: flex; gap: 8px; justify-content: center; margin-bottom: 12px; }
+.nav button { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 18px; font-size: 15px; cursor: pointer; font-weight: 600; }
+.nav button.active { background: var(--accent); color:#0b0f14; border-color: var(--accent); }
+.panel { background: var(--surface); padding: 18px; border-radius: 16px; width: 100%; max-width: 440px; box-shadow: 0 4px 15px rgba(0,0,0,0.4); text-align: left; }
 .view { display: none; } .active { display: block; }
-.btn { padding: 12px 20px; background: #607d8b; color: white; border: none; border-radius: 8px; cursor: pointer; width: 100%; margin-top: 10px; font-weight: bold; }
-#scan-res { text-align: left; margin: 10px 0; max-height: 150px; overflow-y: auto; background: #f9f9f9; border-radius: 8px; }
-.net-item { cursor: pointer; padding: 10px; border-bottom: 1px solid #eee; font-size: 14px; }
+h2 { margin: 0 0 12px; font-size: 20px; }
+.sub { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+.box { padding: 12px; margin: 8px 0; border-radius: 8px; color: #fff; font-weight: 700; text-align: left; }
 .data-row { display: flex; justify-content: space-around; font-size: 1.2em; margin: 15px 0; }
-input, select { width: 90%; padding: 12px; margin: 8px 0; border: 1px solid #ccc; border-radius: 6px; }
-label { display: block; text-align: left; margin-top: 10px; font-weight: bold; color: #455a64; }
-.btn-danger { background: #90a4ae; font-size: 11px; padding: 5px; margin-top: 5px; width: auto; display: inline-block; }
+.data-row span.val { color: #fff; }
+.card { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; margin: 10px 0; text-align: left; overflow: hidden; }
+.card summary { list-style: none; cursor: pointer; padding: 13px 14px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; user-select: none; }
+.card summary::-webkit-details-marker { display: none; }
+.card[open] summary { border-bottom: 1px solid var(--border); }
+.card summary::after { content: "▸"; color: var(--muted); transition: transform .15s; }
+.card[open] summary::after { transform: rotate(90deg); }
+.card-body { padding: 10px 14px 14px; }
+label { display: block; text-align: left; margin-top: 10px; font-weight: 600; color: var(--muted); font-size: 13px; }
+input[type=text], input[type=password], input[type=number], select { width: 100%; padding: 11px; margin: 6px 0; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-size: 15px; }
+input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; vertical-align: middle; }
+.btn { display: inline-block; width: 100%; padding: 12px; background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; margin-top: 10px; font-weight: 700; font-size: 15px; }
+.btn:hover { border-color: var(--accent); }
+.btn-primary { background: var(--accent); color: #0b0f14; border-color: var(--accent); }
+.btn-link { text-decoration: none; }
+.btn-danger { background: transparent; color: var(--red); border-color: var(--red); font-size: 12px; padding: 7px; width: auto; }
+.btn-sm { width: auto; padding: 8px 12px; font-size: 13px; }
+#scan-res { text-align: left; margin: 10px 0; max-height: 170px; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+.net-item { cursor: pointer; padding: 10px; border-bottom: 1px solid var(--border); font-size: 14px; color: var(--text); }
+.net-item:last-child { border-bottom: none; }
+.hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
 </style></head><body>
+<div class="nav">
+<button id="nav-dash" class="active" onclick="sh('main-view',this)">🏠 Dashboard</button>
+<button id="nav-settings" onclick="sh('settings-view',this)">⚙️ Settings</button>
+</div>
 <div id="main-view" class="panel view active">
-<h2>Air Quality</h2><p id="st-i" style="color:#888;font-size:12px">Loading...</p>
+<h2>Air Quality</h2>
+<div class="sub" id="st-i">Loading...</div>
 <div id="c-b" class="box">CO2: --</div>
 <div id="p1-b" class="box">PM1.0: --</div>
 <div id="p25-b" class="box">PM2.5: --</div>
 <div id="p10-b" class="box">PM10: --</div>
-<div class="data-row"><div>🌡️ <span id="t-v">--</span>°C</div><div>💧 <span id="h-v">--</span>%</div></div>
-<button class="btn" onclick="sh('settings-view')">⚙️ Settings</button>
+<div class="data-row"><div>🌡️ <span class="val" id="t-v">--</span>°C</div><div>💧 <span class="val" id="h-v">--</span>%</div></div>
 </div>
 <div id="settings-view" class="panel view">
 <h2>Settings</h2>
-<div style="border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 15px;">
-<button class="btn" style="background:#2196f3; margin-bottom:5px;" onclick="scan()">📡 Scan WiFi</button>
-<button class="btn" style="background:#e91e63; margin-bottom:5px;" onclick="location.href='/ota'">📦 Firmware Update (OTA)</button>
-<button class="btn" style="background:#673ab7; margin-bottom:5px;" onclick="location.href='/logs'">📋 Monitoring Logs</button>
-<button class="btn" style="background:#ff9800; margin-bottom:5px;" id="rot-btn" onclick="if(confirm('Rotate display 180° and restart?')) { location.href='/rotate'; }">🔄 Rotate Display 180°</button>
-<button class="btn btn-danger" onclick="if(confirm('Erase all saved WiFi networks?')) { location.href='/clearwifi'; }">🗑️ Reset WiFi List</button>
-</div>
+<div class="sub">Expand categories and press Save &amp; Restart when done.</div>
+
+<details class="card" open>
+<summary>📡 Wi-Fi</summary>
+<div class="card-body">
+<button class="btn" style="background:#2196f3;border-color:#2196f3;" onclick="scan()">Scan Networks</button>
 <div id="scan-res"></div>
-<form action="/connect" method="POST">
-<label>WiFi SSID:</label><input name="ssid" id="ssid" placeholder="New Network SSID">
-<label>WiFi Password:</label><input name="pass" type="password">
-<hr>
-<label>GMT Offset (e.g. 2 or -8):</label><input type="number" name="gmt_h" id="gmt_h" step="1">
-<label>Daylight Saving (DST):</label>
+<label>SSID</label><input name="ssid" id="ssid" autocomplete="off" placeholder="Network name">
+<label>Password</label><input name="pass" type="password" autocomplete="off">
+<button class="btn btn-danger" style="margin-top:12px;" onclick="if(confirm('Erase all saved WiFi networks?')){location.href='/clearwifi'}">🗑️ Erase Saved Networks</button>
+</div>
+</details>
+
+<details class="card">
+<summary>🕐 Clock &amp; Timezone</summary>
+<div class="card-body">
+<label>GMT Offset (hours, e.g. 2 or -8)</label>
+<input type="number" name="gmt_h" id="gmt_h" step="1">
+<label>Daylight Saving (DST)</label>
 <select name="dst_en" id="dst_en"><option value="0">Disabled</option><option value="3600">Enabled (+1 Hour)</option></select>
-<hr>
-<label><input type="checkbox" name="m_en" id="m_en" style="width:auto"> Enable MQTT</label>
-<label>Broker IP:</label><input name="m_srv" id="m_srv" placeholder="Current: Saved">
-<label>Port:</label><input name="m_port" id="m_port" type="number" placeholder="1883">
-<label>User:</label><input name="m_user" id="m_user" placeholder="Keep current">
-<label>Pass:</label><input name="m_pass" id="m_pass" type="password" placeholder="Keep current">
-<hr>
-<label><input type="checkbox" name="n_on" id="n_on" style="width:auto"> Night mode (dim backlight)</label>
-<label>Start hour (0-23, default 23):</label><input type="number" name="n_sh" id="n_sh" min="0" max="23" step="1" placeholder="23">
-<label>End hour (0-23, default 7):</label><input type="number" name="n_eh" id="n_eh" min="0" max="23" step="1" placeholder="7">
-<button type="submit" class="btn" style="background:#4caf50">Save & Restart</button>
-</form>
-<button class="btn" style="background:none;color:#888" onclick="sh('main-view')">← Back</button>
+</div>
+</details>
+
+<details class="card">
+<summary>📤 MQTT Broker</summary>
+<div class="card-body">
+<label><input type="checkbox" name="m_en" id="m_en"> Enable MQTT</label>
+<label>Broker host</label><input name="m_srv" id="m_srv" autocomplete="off" placeholder="Current: saved">
+<label>Port</label><input name="m_port" id="m_port" type="number" placeholder="1883">
+<label>User</label><input name="m_user" id="m_user" autocomplete="off" placeholder="Keep current">
+<label>Password</label><input name="m_pass" id="m_pass" type="password" autocomplete="off" placeholder="Keep current">
+<div class="hint">Blank user/password keeps the saved values.</div>
+</div>
+</details>
+
+<details class="card">
+<summary>🖥️ Display</summary>
+<div class="card-body">
+<button class="btn" style="background:#ff9800;border-color:#ff9800;" id="rot-btn" onclick="if(confirm('Rotate display 180° and restart?')){location.href='/rotate'}">🔄 Rotate Display</button>
+</div>
+</details>
+
+<details class="card">
+<summary>🌙 Night Mode</summary>
+<div class="card-body">
+<label><input type="checkbox" name="n_on" id="n_on"> Dim backlight at night</label>
+<label>Start hour (0-23)</label><input type="number" name="n_sh" id="n_sh" min="0" max="23" step="1" placeholder="23">
+<label>End hour (0-23)</label><input type="number" name="n_eh" id="n_eh" min="0" max="23" step="1" placeholder="7">
+</div>
+</details>
+
+<details class="card">
+<summary>🧰 Maintenance</summary>
+<div class="card-body">
+<div style="display:flex;gap:8px;margin-top:10px;">
+<a href="/ota" class="btn btn-link">📦 Firmware OTA</a>
+<a href="/logs" class="btn btn-link" style="background:#673ab7;border-color:#673ab7;">📋 Monitoring Logs</a>
+</div>
+</div>
+</details>
+
+<button class="btn btn-primary" type="button" onclick="save()">💾 Save &amp; Restart</button>
 </div>
 <script>
-function sh(id){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(id).classList.add('active');}
-function update(){
-fetch("/status").then(r=>r.json()).then(d=>{
+function sh(id,btn){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(id).classList.add('active');
+document.getElementById('nav-dash').classList.toggle('active',id==='main-view');document.getElementById('nav-settings').classList.toggle('active',id==='settings-view');}
+function update(){ fetch("/status").then(r=>r.json()).then(d=>{
 document.getElementById("st-i").innerText = d.ssid + " | " + d.ip + " | MQTT: " + d.mq;
 uB("c-b", d.co2, d.co2lvl, d.co2clr, "CO2"); uB("p1-b", d.pm1, d.pm1lvl, d.pm1clr, "PM1.0");
 uB("p25-b", d.pm25, d.pm25lvl, d.pm25clr, "PM2.5"); uB("p10-b", d.pm10, d.pm10lvl, d.pm10clr, "PM10");
 document.getElementById("t-v").innerText = (d.temp != null)? d.temp : "--";
 document.getElementById("h-v").innerText = (d.hum != null)? d.hum : "--";
-document.getElementById("rot-btn").innerText = (d.rot == 1)? "🔄 Rotate Display 180° (now: flipped)" : "🔄 Rotate Display 180° (now: normal)";
-if(!window.f){
-document.getElementById("m_en").checked = d.m_en;
-document.getElementById("gmt_h").value = d.gmt_h;
-document.getElementById("dst_en").value = d.dst_s;
-document.getElementById("n_on").checked = (d.n_on == 1);
-document.getElementById("n_sh").value = d.n_sh;
-document.getElementById("n_eh").value = d.n_eh;
-window.f=true;
-}
-});
-}
+document.getElementById("rot-btn").innerText = (d.rot == 1)? "🔄 Rotate Display (now: flipped)" : "🔄 Rotate Display (now: normal)";
+if(!window.f){ document.getElementById("m_en").checked = d.m_en; document.getElementById("gmt_h").value = d.gmt_h;
+document.getElementById("dst_en").value = d.dst_s; document.getElementById("n_on").checked = (d.n_on == 1);
+document.getElementById("n_sh").value = d.n_sh; document.getElementById("n_eh").value = d.n_eh; window.f = true; }
+}); }
 function uB(id,v,l,c,n){let e=document.getElementById(id);e.style.background=c;e.innerText=n+": "+v+" ("+l+")";}
 function scan(){let r=document.getElementById("scan-res");r.innerHTML="Scanning...";fetch("/scan").then(r=>r.json()).then(data=>{r.innerHTML="";data.forEach(n=>{let d=document.createElement("div");d.className="net-item";d.innerText=n.ssid+" ("+n.rssi+"dBm)";d.onclick=()=>{document.getElementById("ssid").value=n.ssid;};r.appendChild(d);});});}
+function save(){let f=new FormData();document.querySelectorAll("#settings-view input[name],#settings-view select[name]").forEach(e=>{if(e.type==="checkbox"){if(e.checked)f.append(e.name,"1")}else{f.append(e.name,e.value)}});fetch("/connect",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(f)}).then(r=>r.text()).then(t=>{alert(t);});window.f=false;}
 setInterval(update, 5000); update();
 </script></body></html>
