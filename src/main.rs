@@ -132,6 +132,7 @@ fn main() {
 
     let store = network::NvsStore::new(nvs.clone());
     let mqtt_cfg = store.load_mqtt();
+    logbuf::set_time_offsets(mqtt_cfg.gmt_off, mqtt_cfg.dst_off);
     let stored = store.get_wifi_list();
     let (night_on, night_sh, night_eh, night_lev) = store.get_night();
     let rotated = store.get_display_rot();
@@ -753,6 +754,7 @@ if connected {
              };
             let store = network::NvsStore::new(nvs.clone());
             let _ = store.save_mqtt(&mqtt);
+            logbuf::set_time_offsets(mqtt.gmt_off, mqtt.dst_off);
 
             // Night mode: enabled checkbox + [start, end) hours (0-23) + dim level.
             let n_sh = p.get("n_sh").and_then(|v| v.parse::<i32>().ok()).unwrap_or(config::NIGHT_START_H_DEF);
