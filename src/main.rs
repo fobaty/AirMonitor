@@ -598,6 +598,23 @@ if connected {
         Ok(())
     }).unwrap();
 
+    // GET /logs/tail?after=<id> — JSON lines newer than <id>, for live append
+    server.fn_handler("/logs/tail", esp_idf_svc::http::Method::Get, move |req| -> Result<(), esp_idf_svc::io::EspIOError> {
+        let mut after = 0;
+        let uri = req.uri();
+        if let Some(q) = uri.split('?').nth(1) {
+            for kv in q.split('&') {
+                if let Some(v) = kv.strip_prefix("after=") {
+                    after = v.parse::<u64>().unwrap_or(0);
+                }
+            }
+        }
+        let json = logbuf::tail_json(after);
+        let mut resp = req.into_ok_response()?;
+        resp.write_all(json.as_bytes())?;
+        Ok(())
+    }).unwrap();
+
     // GET /rotate — toggle display 180° and reboot
     {
         let nvs = nvs.clone();
