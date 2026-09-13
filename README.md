@@ -141,7 +141,6 @@ espflash flash --baud 921600 \
   "gmt_h": 2, "dst_s": 0,
   "ssid": "MyNetwork", "ip": "192.168.1.178",
   "rot": 1, "n_on": 0, "n_sh": 23, "n_eh": 7, "n_lev": 40,
-  "m_srv": "192.168.1.99", "m_port": 1883, "m_user": "esp32air",
   "ver": "V0.1.17"
 }
 ```

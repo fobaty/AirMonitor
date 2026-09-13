@@ -521,7 +521,7 @@ if connected {
                     "\"temp\":{},\"hum\":{},\"mq\":\"{}\",\"m_en\":{},",
                     "\"gmt_h\":{},\"dst_s\":{},\"ssid\":\"{}\",\"ip\":\"{}\",",
                     "\"rot\":{},\"n_on\":{},\"n_sh\":{},\"n_eh\":{},\"n_lev\":{},\"ver\":\"{}\",",
-                    "\"m_srv\":\"{}\",\"m_port\":{},\"m_user\":\"{}\",\"m_int\":{}}}"
+                    "\"m_int\":{}}}"
                 ),
                 d.co2, co2lvl, sensors::level_color(co2lvl),
                 d.pm1, pm1lvl, sensors::level_color(pm1lvl),
@@ -541,9 +541,6 @@ if connected {
                 n_eh,
                 cfg.night_lev,
                 config::VERSION,
-                saved_mqtt.server,
-                saved_mqtt.port,
-                saved_mqtt.user,
                 saved_mqtt.interval_sec,
             );
             let mut resp = req.into_ok_response()?;
