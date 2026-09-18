@@ -18,7 +18,7 @@ publishes the readings over Wi-Fi — without any cloud dependencies.
 │   │ PM1.0 Good    5       │ │
 │   │ PM2.5 Good    7       │ │
 │   │ PM10  Good    5       │ │
-│   │ M:OK   192.0.2.114  │ │  ← MQTT state + IP
+│   │ M:OK   192.0.2.114     │ │  ← MQTT state + IP
 │   └───────────────────────┘ │
 └─────────────────────────────┘
 ```
